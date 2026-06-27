@@ -42,6 +42,10 @@ clobbers on-device settings, secrets, birthdays, or photos.
 
 ## Auto-update (pull-based)
 
+**`install_selah.sh` turns this on automatically** (every push reaches the Pi
+within ~15 min). Opt out with `SELAH_NO_AUTOUPDATE=1 ./install_selah.sh` or
+`./install_selah.sh --no-autoupdate`. To wire it up manually instead:
+
 `deploy/selah-update.sh` fetches the chosen branch and, only if it changed,
 hard-resets to it and restarts the service. Install the timer once:
 

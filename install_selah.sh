@@ -93,6 +93,62 @@ sudo systemctl daemon-reload
 sudo systemctl enable selah_display.service
 sudo systemctl restart selah_display.service
 
+# --- Auto-update timer (pulls from GitHub every ~15 min) -------------------
+# Opt out with:  SELAH_NO_AUTOUPDATE=1 ./install_selah.sh   or   --no-autoupdate
+AUTOUPDATE=1
+for arg in "$@"; do
+  [ "$arg" = "--no-autoupdate" ] && AUTOUPDATE=0
+done
+[ "${SELAH_NO_AUTOUPDATE:-0}" = "1" ] && AUTOUPDATE=0
+
+if [ "$AUTOUPDATE" = "1" ]; then
+  echo "Enabling auto-update (checks GitHub every ~15 min)..."
+  chmod +x "$SELAH_DIR/deploy/selah-update.sh" 2>/dev/null || true
+
+  # Update service — path/user-aware so it works wherever the repo lives.
+  UPD_TMP="$(mktemp)"
+  cat > "$UPD_TMP" <<EOF
+[Unit]
+Description=Selah auto-update (git pull + restart if changed)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=$SELAH_USER
+Environment=SELAH_DIR=$SELAH_DIR
+Environment=SELAH_BRANCH=main
+ExecStart=$SELAH_DIR/deploy/selah-update.sh
+EOF
+  sudo cp "$UPD_TMP" /etc/systemd/system/selah-update.service
+  rm -f "$UPD_TMP"
+
+  # Timer.
+  sudo bash -c 'cat > /etc/systemd/system/selah-update.timer' <<'EOF'
+[Unit]
+Description=Run Selah auto-update periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  # Let the service user restart Selah without a password (needed by the script).
+  echo "$SELAH_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart selah_display.service" \
+    | sudo tee /etc/sudoers.d/selah-update >/dev/null
+  sudo chmod 440 /etc/sudoers.d/selah-update
+
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now selah-update.timer
+  echo "Auto-update enabled. (Disable later: sudo systemctl disable --now selah-update.timer)"
+else
+  echo "Auto-update NOT enabled (opted out). Enable later — see DEPLOY.md."
+fi
+
 echo ""
 echo "Installation complete! Next steps:"
 echo "1. Put your Gmail app password + weather key in: $SELAH_DIR/secrets.local.json"
@@ -101,4 +157,4 @@ echo "2. Replace credentials.json with your Google API OAuth client (calendar/dr
 echo "3. Add birthdays/anniversaries to special_days.json (see special_days.example.json)."
 echo "4. Place media in media/portrait, media/landscape, media/art, or media/display."
 echo "5. Run 'python3 verify_install.py' to confirm everything is ready."
-echo "6. (Optional) enable pull-based auto-update — see DEPLOY.md."
+echo "6. Auto-update is ON — every push to GitHub reaches this Pi within ~15 min."
