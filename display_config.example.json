@@ -20,6 +20,7 @@
   "timezone": "America/Toronto",
   "calendar_start_time": "06:00",
   "calendar_duration_minutes": 0,
+  "moon_phase_enabled": true,
   "enable_face_recognition": true,
   "verse_display_enabled": true,
   "calendar_display_enabled": true,

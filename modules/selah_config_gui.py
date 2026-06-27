@@ -311,6 +311,7 @@ def show_config_gui(screen, config):
             ("timezone", "Time Zone", "str"),
             ("on_time", "Photos Start (morning HH:MM)", "str"),
             ("off_time", "Photos Stop (night HH:MM)", "str"),
+            ("moon_phase_enabled", "Night Moon Phase", "bool"),
             ("calendar_display_enabled", "Daily Agenda (calendar)", "bool"),
             ("calendar_start_time", "  Agenda Start (HH:MM)", "str"),
             ("calendar_duration_minutes", "  Agenda Duration (min, 0=all day)", "int"),

@@ -26,6 +26,7 @@ DEFAULT_CONFIG = {
     "timezone": "America/Toronto",
     "calendar_start_time": "06:00",
     "calendar_duration_minutes": 0,
+    "moon_phase_enabled": True,
     "enable_face_recognition": False,
     "verse_display_enabled": False,
     "calendar_display_enabled": False,

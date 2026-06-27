@@ -33,6 +33,7 @@ from modules.calendar_display import show_calendar_if_scheduled
 from modules.motion_detector import detect_motion
 from modules.face_recognition_handler import prioritize_images
 from modules.quote_loader import show_clock_with_quote
+from modules.moon_phase import show_moon_phase
 from modules.selah_config_gui import show_config_gui
 from modules.sender_manager import show_sender_manager
 from modules.leaderboard import show_leaderboard
@@ -237,8 +238,13 @@ def main():
                         detect_motion(config, screens)
                     except Exception as e:
                         log_error(f"Night-mode motion check failed: {e}")
-                for screen in screens.values():
-                    show_clock_with_quote(screen, config)
+                # Dedicate one HDMI to a large moon phase (if enabled); the
+                # rest show the analog clock + nightly quote.
+                for i, screen in enumerate(screens.values()):
+                    if config.get("moon_phase_enabled", True) and i == 0:
+                        show_moon_phase(screen, config)
+                    else:
+                        show_clock_with_quote(screen, config)
                 time.sleep(10)
                 # Still check email during night mode
                 if current_ts - last_email_check > email_check_interval:
