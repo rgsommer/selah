@@ -1,7 +1,253 @@
 """F1 on-screen configuration editor using pygame UI."""
 
+import re
+import time
 import pygame
 from modules.logger import log_error
+
+
+def _load_contacts():
+    """Load the family/friends list (the approved-senders whitelist)."""
+    try:
+        from modules.email_handler import load_approved_senders
+        return [str(s) for s in load_approved_senders()]
+    except Exception:
+        return []
+
+# Default weights restored when a layout checkbox is switched back ON.
+LAYOUT_DEFAULT_WEIGHTS = {"single": 50, "tile3": 30, "tile6": 20}
+
+
+def _layout_is_on(config, mode):
+    """A layout is 'on' when its weight is non-zero."""
+    return (config.get("layout_weights") or {}).get(mode, 0) > 0
+
+
+def _layout_toggle(config, mode):
+    """Flip a layout on/off by toggling its weight between 0 and a default."""
+    weights = dict(config.get("layout_weights") or {})
+    if weights.get(mode, 0) > 0:
+        weights[mode] = 0
+    else:
+        weights[mode] = LAYOUT_DEFAULT_WEIGHTS.get(mode, 25)
+    config["layout_weights"] = weights
+
+
+def _extract_folder_id(text):
+    """Pull a Drive folder ID from a pasted share link, or accept a raw ID.
+
+    Handles:
+      https://drive.google.com/drive/folders/<ID>?usp=sharing
+      https://drive.google.com/open?id=<ID>
+      <ID>
+    """
+    text = (text or "").strip()
+    if not text:
+        return ""
+    m = re.search(r"/folders/([A-Za-z0-9_-]+)", text)
+    if m:
+        return m.group(1)
+    m = re.search(r"[?&]id=([A-Za-z0-9_-]+)", text)
+    if m:
+        return m.group(1)
+    # Otherwise assume a raw ID (strip any stray query/path bits).
+    return text.split("?")[0].rstrip("/").split("/")[-1]
+
+
+def _manage_drive_folders(screen, config):
+    """Sub-screen to add/remove Google Drive source folders.
+
+    A=Add (paste a share link or ID), D=Delete selected, ESC=Back.
+    Edits config["google_drive_folder_ids"] in place.
+    """
+    screen_w, screen_h = screen.get_size()
+    font_size = max(22, screen_w // 40)
+    font = pygame.font.Font(None, font_size)
+    title_font = pygame.font.Font(None, font_size + 10)
+    small = pygame.font.Font(None, max(18, font_size - 6))
+
+    folders = [str(f) for f in (config.get("google_drive_folder_ids") or [])]
+    selected = 0
+    adding = False
+    buf = ""
+    clock = pygame.time.Clock()
+
+    running = True
+    while running:
+        screen.fill((20, 20, 40))
+        title = title_font.render("Google Drive Folders", True, (100, 200, 255))
+        screen.blit(title, (20, 10))
+        instr = small.render(
+            "A=Add   D=Delete   ESC=Back     (paste a share link or folder ID)",
+            True, (150, 150, 150))
+        screen.blit(instr, (20, 15 + title_font.get_linesize()))
+
+        y = 60 + title_font.get_linesize()
+        if not folders and not adding:
+            empty = font.render("(none yet — press A to add a folder)", True, (200, 200, 120))
+            screen.blit(empty, (30, y))
+        for i, fid in enumerate(folders):
+            if i == selected and not adding:
+                hl = pygame.Surface((screen_w - 20, font_size + 8), pygame.SRCALPHA)
+                hl.fill((60, 60, 120, 150))
+                screen.blit(hl, (10, y - 2))
+            txt = font.render(f"{i + 1}.  {fid}", True, (255, 255, 255))
+            screen.blit(txt, (30, y))
+            y += font_size + 10
+
+        if adding:
+            prompt = font.render("Add (link or ID): " + buf + "_", True, (255, 255, 100))
+            screen.blit(prompt, (30, y + 14))
+
+        try:
+            pygame.display.flip()
+        except Exception:
+            pass
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if adding:
+                    if event.key == pygame.K_RETURN:
+                        fid = _extract_folder_id(buf)
+                        if fid and fid not in folders:
+                            folders.append(fid)
+                            selected = len(folders) - 1
+                        adding, buf = False, ""
+                    elif event.key == pygame.K_ESCAPE:
+                        adding, buf = False, ""
+                    elif event.key == pygame.K_BACKSPACE:
+                        buf = buf[:-1]
+                    elif event.unicode and event.unicode.isprintable():
+                        buf += event.unicode
+                else:
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+                    elif event.key == pygame.K_a:
+                        adding, buf = True, ""
+                    elif event.key == pygame.K_d and folders:
+                        folders.pop(selected)
+                        selected = max(0, min(selected, len(folders) - 1))
+                    elif event.key == pygame.K_DOWN:
+                        selected = min(selected + 1, max(0, len(folders) - 1))
+                    elif event.key == pygame.K_UP:
+                        selected = max(selected - 1, 0)
+
+        clock.tick(30)
+
+    config["google_drive_folder_ids"] = folders
+
+
+def _manage_contacts(screen, config):
+    """Sub-screen to manage family/friends emails and send invitations.
+
+    A=Add email, D=Delete, N=Nudge (email everyone an invitation explaining how
+    to send photos and schedule birthday greetings), ESC=Back. The list is the
+    approved-senders whitelist, so adding someone here also lets them submit.
+    """
+    screen_w, screen_h = screen.get_size()
+    font_size = max(22, screen_w // 40)
+    font = pygame.font.Font(None, font_size)
+    title_font = pygame.font.Font(None, font_size + 10)
+    small = pygame.font.Font(None, max(18, font_size - 6))
+
+    contacts = _load_contacts()
+    selected = 0
+    adding = False
+    buf = ""
+    message = ""
+    msg_until = 0
+    clock = pygame.time.Clock()
+
+    def save():
+        try:
+            from modules.email_handler import _save_approved_senders
+            _save_approved_senders(contacts)
+        except Exception as e:
+            log_error(f"Failed to save contacts: {e}")
+
+    running = True
+    while running:
+        screen.fill((20, 20, 40))
+        title = title_font.render("Family & Friends", True, (100, 200, 255))
+        screen.blit(title, (20, 10))
+        instr = small.render(
+            "A=Add   D=Delete   N=Nudge (send invite)   ESC=Back",
+            True, (150, 150, 150))
+        screen.blit(instr, (20, 15 + title_font.get_linesize()))
+
+        y = 60 + title_font.get_linesize()
+        if not contacts and not adding:
+            screen.blit(font.render("(none yet — press A to add an email)", True, (200, 200, 120)), (30, y))
+        for i, em in enumerate(contacts):
+            if i == selected and not adding:
+                hl = pygame.Surface((screen_w - 20, font_size + 8), pygame.SRCALPHA)
+                hl.fill((60, 60, 120, 150))
+                screen.blit(hl, (10, y - 2))
+            screen.blit(font.render(f"{i + 1}.  {em}", True, (255, 255, 255)), (30, y))
+            y += font_size + 10
+
+        if adding:
+            screen.blit(font.render("Add email: " + buf + "_", True, (255, 255, 100)), (30, y + 14))
+
+        if message and time.time() < msg_until:
+            screen.blit(font.render(message, True, (120, 255, 160)), (30, screen_h - font_size - 16))
+
+        try:
+            pygame.display.flip()
+        except Exception:
+            pass
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if adding:
+                    if event.key == pygame.K_RETURN:
+                        em = buf.strip()
+                        if em and "@" in em and em not in contacts:
+                            contacts.append(em)
+                            selected = len(contacts) - 1
+                            save()
+                        adding, buf = False, ""
+                    elif event.key == pygame.K_ESCAPE:
+                        adding, buf = False, ""
+                    elif event.key == pygame.K_BACKSPACE:
+                        buf = buf[:-1]
+                    elif event.unicode and event.unicode.isprintable():
+                        buf += event.unicode
+                else:
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+                    elif event.key == pygame.K_a:
+                        adding, buf = True, ""
+                    elif event.key == pygame.K_d and contacts:
+                        contacts.pop(selected)
+                        selected = max(0, min(selected, len(contacts) - 1))
+                        save()
+                    elif event.key == pygame.K_n and contacts:
+                        # Show a sending indicator, then send synchronously.
+                        screen.blit(font.render("Sending invitations...", True, (255, 255, 100)),
+                                    (30, screen_h - font_size - 16))
+                        try:
+                            pygame.display.flip()
+                        except Exception:
+                            pass
+                        try:
+                            from modules.email_handler import send_invitations
+                            n = send_invitations(config, recipients=contacts)
+                            message = f"Invitation sent to {n} contact(s)."
+                        except Exception as e:
+                            log_error(f"Nudge failed: {e}")
+                            message = "Nudge failed — check email settings."
+                        msg_until = time.time() + 4
+                    elif event.key == pygame.K_DOWN:
+                        selected = min(selected + 1, max(0, len(contacts) - 1))
+                    elif event.key == pygame.K_UP:
+                        selected = max(selected - 1, 0)
+
+        clock.tick(30)
 
 
 def show_config_gui(screen, config):
@@ -19,24 +265,50 @@ def show_config_gui(screen, config):
         font = pygame.font.Font(None, font_size)
         title_font = pygame.font.Font(None, font_size + 10)
 
-        # Editable config keys with display labels
+        # Editable config keys: (key, label, type).
+        # type "layoutbool" toggles config["layout_weights"][key] on/off.
         editable_fields = [
+            # --- Layout variety ---
+            ("layout_variety_enabled", "Layout Variety", "bool"),
+            ("single", "  Layout: Full Single", "layoutbool"),
+            ("tile3", "  Layout: Tile 3", "layoutbool"),
+            ("tile6", "  Layout: Tile 6", "layoutbool"),
+            ("layout_fade_enabled", "  Fade Transitions", "bool"),
             ("rotate_interval", "Rotate Interval (sec)", "int"),
-            ("on_time", "Display On Time", "str"),
-            ("off_time", "Display Off Time", "str"),
-            ("manual_navigation_pause", "Nav Pause (sec)", "int"),
-            ("motion_timeout", "Motion Timeout (sec)", "int"),
-            ("enable_face_recognition", "Face Recognition", "bool"),
-            ("verse_display_enabled", "Verse Display", "bool"),
-            ("calendar_display_enabled", "Calendar Display", "bool"),
+
+            # --- Daily schedule ---
+            ("timezone", "Time Zone", "str"),
+            ("on_time", "Photos Start (morning HH:MM)", "str"),
+            ("off_time", "Photos Stop (night HH:MM)", "str"),
+            ("calendar_display_enabled", "Daily Agenda (calendar)", "bool"),
+            ("calendar_start_time", "  Agenda Start (HH:MM)", "str"),
+            ("calendar_duration_minutes", "  Agenda Duration (min, 0=all day)", "int"),
             ("weather_enabled", "Weather Display", "bool"),
+            ("weather_time", "  Weather Time (HH:MM)", "str"),
+            ("status_line_enabled", "Status Line (time+temp+forecast)", "bool"),
+            ("status_line_position", "  Status Line Position (top/bottom)", "str"),
+            ("special_days_enabled", "Special Days", "bool"),
+            ("special_days_time", "  Special Days Time (HH:MM)", "str"),
+
+            # --- People ---
+            ("__contacts__", "Family & Friends (invite)", "contacts"),
+
+            # --- Photo sources ---
+            ("cloud_backup_enabled", "Google Drive Sync", "bool"),
+            ("google_drive_folder_ids", "Drive Folders", "drivelist"),
+
+            # --- Features ---
+            ("verse_display_enabled", "Verse Display", "bool"),
+            ("enable_face_recognition", "Face Recognition", "bool"),
             ("motion_detection_enabled", "Motion Detection", "bool"),
             ("motion_triggered_slideshow", "Motion Slideshow", "bool"),
+            ("motion_timeout", "Motion Timeout (sec)", "int"),
+            ("night_light_enabled", "Night Light (motion)", "bool"),
             ("voice_control_enabled", "Voice Control", "bool"),
             ("web_control_enabled", "Web Control", "bool"),
-            ("weather_time", "Weather Time (HH:MM)", "str"),
-            ("special_days_enabled", "Special Days", "bool"),
-            ("night_light_enabled", "Night Light (motion)", "bool"),
+            ("manual_navigation_pause", "Nav Pause (sec)", "int"),
+
+            # --- Captions / overlays ---
             ("show_file_name", "Show File Name", "bool"),
             ("show_file_date", "Show File Date", "bool"),
             ("show_caption", "Show Caption", "bool"),
@@ -50,7 +322,11 @@ def show_config_gui(screen, config):
         editing = False
         edit_buffer = ""
         scroll_offset = 0
-        max_visible = (screen_h - 120) // (font_size + 12)
+
+        # Leave room for the two-line header and a footer hint.
+        header_h = 70 + title_font.get_linesize()
+        footer_h = font_size + 16
+        max_visible = max(4, (screen_h - header_h - footer_h) // (font_size + 12))
 
         running = True
         clock = pygame.time.Clock()
@@ -70,10 +346,9 @@ def show_config_gui(screen, config):
             screen.blit(instructions, (20, 15 + title_font.get_linesize()))
 
             # Draw fields
-            y = 60 + title_font.get_linesize()
+            y = header_h
             for i in range(scroll_offset, min(len(editable_fields), scroll_offset + max_visible)):
                 key, label, ftype = editable_fields[i]
-                value = config.get(key, "")
 
                 # Highlight selected row
                 if i == selected:
@@ -89,17 +364,35 @@ def show_config_gui(screen, config):
                 if editing and i == selected:
                     val_str = edit_buffer + "_"
                     color = (255, 255, 100)
+                elif ftype == "layoutbool":
+                    on = _layout_is_on(config, key)
+                    val_str = "ON" if on else "OFF"
+                    color = (100, 255, 100) if on else (255, 100, 100)
+                elif ftype == "bool":
+                    on = config.get(key, False)
+                    val_str = "ON" if on else "OFF"
+                    color = (100, 255, 100) if on else (255, 100, 100)
+                elif ftype == "drivelist":
+                    n = len(config.get("google_drive_folder_ids") or [])
+                    val_str = f"{n} folder(s)  [Enter]"
+                    color = (255, 255, 255)
+                elif ftype == "contacts":
+                    val_str = f"{len(_load_contacts())} people  [Enter]"
+                    color = (255, 255, 255)
                 else:
-                    if ftype == "bool":
-                        val_str = "ON" if value else "OFF"
-                        color = (100, 255, 100) if value else (255, 100, 100)
-                    else:
-                        val_str = str(value)
-                        color = (255, 255, 255)
+                    val_str = str(config.get(key, ""))
+                    color = (255, 255, 255)
 
                 val_surf = font.render(val_str, True, color)
                 screen.blit(val_surf, (screen_w // 2, y))
                 y += font_size + 12
+
+            # Footer hint — the family whitelist lives in the F2 sender manager.
+            footer = font.render(
+                "Family whitelist: close this, then press F2 (Sender Manager)",
+                True, (120, 160, 220)
+            )
+            screen.blit(footer, (20, screen_h - footer_h))
 
             try:
                 pygame.display.flip()
@@ -141,13 +434,21 @@ def show_config_gui(screen, config):
                                 scroll_offset = selected
                         elif event.key == pygame.K_RETURN:
                             key, _, ftype = editable_fields[selected]
-                            if ftype != "bool":
+                            if ftype == "drivelist":
+                                # Open the add/remove sub-screen.
+                                _manage_drive_folders(screen, config)
+                            elif ftype == "contacts":
+                                _manage_contacts(screen, config)
+                            elif ftype not in ("bool", "layoutbool"):
+                                # Only text/number fields are editable; toggles use Space.
                                 editing = True
                                 edit_buffer = str(config.get(key, ""))
                         elif event.key == pygame.K_SPACE:
                             key, _, ftype = editable_fields[selected]
                             if ftype == "bool":
                                 config[key] = not config.get(key, False)
+                            elif ftype == "layoutbool":
+                                _layout_toggle(config, key)
 
             clock.tick(30)
 

@@ -50,6 +50,60 @@ def show_weather_if_scheduled(screens, config):
                 _render_weather(screen, weather, config)
 
 
+def show_status_line(screens, config):
+    """Draw a one-line glance bar: time + current temp + today's forecast.
+
+    e.g.  "3:42 PM    14°C    Today 25°C  Clear Sky"
+
+    Time always shows; temp/forecast appear when weather data is available
+    (cached from the same OpenWeatherMap fetch the weather card uses). Position
+    is "top" or "bottom" per config.
+    """
+    now = datetime.datetime.now()
+    try:
+        time_str = now.strftime("%-I:%M %p")  # 3:42 PM (Linux/macOS)
+    except Exception:
+        time_str = now.strftime("%H:%M")
+
+    parts = [time_str]
+    weather = _get_weather(config)
+    if weather:
+        parts.append(f"{weather['temp']}°C")
+        hi = weather.get("temp_max")
+        cond = weather.get("description", "")
+        if hi is not None:
+            parts.append(f"Today {hi}°C  {cond}".strip())
+        elif cond:
+            parts.append(cond)
+
+    text = "    ".join(parts)
+    position = config.get("status_line_position", "top")
+    for screen in screens.values():
+        _render_status_line(screen, text, position)
+
+
+def _render_status_line(screen, text, position):
+    """Render the glance bar as a thin translucent strip at top or bottom."""
+    try:
+        w, h = screen.get_size()
+        font_size = max(20, w // 50)
+        font = pygame.font.Font(None, font_size)
+        surf = font.render(text, True, (255, 255, 255))
+        bar_h = surf.get_height() + 12
+        by = (h - bar_h) if position == "bottom" else 0
+
+        bg = pygame.Surface((w, bar_h), pygame.SRCALPHA)
+        bg.fill((0, 0, 0, 150))
+        screen.blit(bg, (0, by))
+        screen.blit(surf, (14, by + 6))
+        try:
+            pygame.display.flip()
+        except Exception:
+            pass
+    except Exception as e:
+        log_error(f"Status line render failed: {e}")
+
+
 def _get_weather(config):
     """Fetch weather data from OpenWeatherMap or local cache."""
     global _last_weather_check, _cached_weather
@@ -97,6 +151,7 @@ def _fetch_openweathermap(api_key, location):
             data = response.json()
             return {
                 "temp": round(data["main"]["temp"]),
+                "temp_max": round(data["main"].get("temp_max", data["main"]["temp"])),
                 "feels_like": round(data["main"]["feels_like"]),
                 "description": data["weather"][0]["description"].title(),
                 "humidity": data["main"]["humidity"],

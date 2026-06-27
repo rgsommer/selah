@@ -18,10 +18,13 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import pygame
 
 from modules.config_utils import load_config, save_config
-from modules.display_handler import init_displays, show_image, show_video, check_for_display_changes
+from modules.display_handler import (
+    init_displays, show_image, show_video, check_for_display_changes,
+    show_layout, pick_layout_mode, layout_file_count,
+)
 from modules.image_loader import get_images_and_videos
 from modules.event_handler import handle_events
-from modules.time_manager import is_display_off
+from modules.time_manager import is_display_off, apply_timezone
 from modules.email_handler import check_for_new_emails, send_annual_invites
 from modules.logger import log_error
 from modules.toast import show_toast_if_needed
@@ -33,7 +36,7 @@ from modules.quote_loader import show_clock_with_quote
 from modules.selah_config_gui import show_config_gui
 from modules.sender_manager import show_sender_manager
 from modules.leaderboard import show_leaderboard
-from modules.weather_display import show_weather_if_scheduled
+from modules.weather_display import show_weather_if_scheduled, show_status_line
 from modules.voice_control import process_voice_command
 from modules.theme_manager import apply_theme
 from modules.quiz_mode import start_quiz_mode
@@ -59,17 +62,67 @@ def _get_media_metadata(file_path, media_log):
     return None, None
 
 
+VIDEO_EXTS = ('.mp4', '.avi', '.mov')
+
+
 def _display_file(screen, file_path, config, file_date=None, caption=None):
     """Display a single file (image or video) on a screen."""
-    if file_path.lower().endswith(('.mp4', '.avi', '.mov')):
+    if file_path.lower().endswith(VIDEO_EXTS):
         show_video(screen, file_path, config, file_date, caption)
     else:
         show_image(screen, file_path, config, file_date, caption)
 
 
+def _render_screen(screen, screen_type, files, state, config, media_log):
+    """Render the next slideshow frame for one screen, with random layout variety.
+
+    Picks a layout (single / tile3 / tile6) per rotation; videos always play
+    full-screen. Advances the screen's index by the number of files consumed.
+    """
+    idx = state[screen_type]["index"] % len(files)
+    first = files[idx]
+
+    mode = pick_layout_mode(config)
+    if first.lower().endswith(VIDEO_EXTS):
+        mode = "single"  # videos never tile
+
+    if mode == "single":
+        file_date, caption = _get_media_metadata(first, media_log)
+        if first.lower().endswith(VIDEO_EXTS):
+            show_video(screen, first, config, file_date, caption)
+        else:
+            show_layout(screen, [first], config, "single", file_meta=(file_date, caption))
+        state[screen_type]["index"] = (idx + 1) % len(files)
+        return
+
+    # Tile modes: gather N images (skipping videos), starting at idx.
+    need = layout_file_count(mode)
+    picks, i, scanned = [], idx, 0
+    while len(picks) < need and scanned < len(files):
+        f = files[i % len(files)]
+        if not f.lower().endswith(VIDEO_EXTS):
+            picks.append(f)
+        i += 1
+        scanned += 1
+
+    if len(picks) < need:
+        # Not enough images for a collage — fall back to a single photo.
+        f = picks[0] if picks else first
+        fd, cap = _get_media_metadata(f, media_log)
+        show_layout(screen, [f], config, "single", file_meta=(fd, cap))
+        state[screen_type]["index"] = (idx + 1) % len(files)
+    else:
+        show_layout(screen, picks, config, mode)
+        state[screen_type]["index"] = i % len(files)
+
+
 def main():
     print("[Selah] Starting display system...")
     config = load_config("display_config.json")
+
+    # Apply timezone first so all scheduling (day/night, agenda, special days)
+    # runs in the configured zone (e.g. Eastern with auto DST).
+    apply_timezone(config)
 
     # Initialize displays
     screens = init_displays()
@@ -321,11 +374,12 @@ def main():
                             pass
                         continue
 
-                    idx = state[screen_type]["index"] % len(files)
-                    file_path = files[idx]
-                    file_date, caption = _get_media_metadata(file_path, media_log)
-                    _display_file(screen, file_path, config, file_date, caption)
-                    state[screen_type]["index"] = (idx + 1) % len(files)
+                    _render_screen(screen, screen_type, files, state, config, media_log)
+
+            # ---- STATUS LINE (time + temp + today's forecast) ----
+            # Drawn last so it sits on top of the freshly rendered photo.
+            if config.get("status_line_enabled", False):
+                show_status_line(screens, config)
 
             time.sleep(rotate_interval)
 

@@ -31,3 +31,7 @@ recordings/
 
 # macOS
 .DS_Store
+
+# Local demo / venv
+.venv/
+*.demobak

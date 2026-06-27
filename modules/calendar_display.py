@@ -9,11 +9,39 @@ _last_calendar_check = None
 _cached_events = []
 
 
+def _parse_hhmm(value):
+    """Parse 'HH:MM' into (hour, minute), or None if invalid."""
+    try:
+        t = datetime.datetime.strptime(str(value), "%H:%M")
+        return t.hour, t.minute
+    except Exception:
+        return None
+
+
 def show_calendar_if_scheduled(screens, config):
-    """Show calendar events at scheduled times (every 30 minutes, at :15 and :45)."""
+    """Show the daily agenda from Google Calendar.
+
+    Two modes, chosen by ``calendar_duration_minutes``:
+      * > 0 : the agenda runs as a window starting at ``calendar_start_time``
+              for that many minutes, then stops for the day. (e.g. start 06:00,
+              duration 120 -> agenda shows 06:00-08:00.)
+      * 0   : legacy behavior — a brief agenda twice an hour, all day.
+    """
     now = datetime.datetime.now()
-    if now.minute not in (15, 45) or now.second > 30:
-        return
+    duration = int(config.get("calendar_duration_minutes", 0) or 0)
+
+    if duration > 0:
+        start = _parse_hhmm(config.get("calendar_start_time", "06:00"))
+        if start is None:
+            return
+        start_dt = now.replace(hour=start[0], minute=start[1], second=0, microsecond=0)
+        end_dt = start_dt + datetime.timedelta(minutes=duration)
+        if not (start_dt <= now < end_dt):
+            return
+    else:
+        # Legacy: a quick pass at :15 and :45.
+        if now.minute not in (15, 45) or now.second > 30:
+            return
 
     events = _get_calendar_events(config)
     if events:

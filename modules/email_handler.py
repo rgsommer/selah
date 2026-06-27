@@ -302,13 +302,21 @@ Here's how it works:
   - Just attach a photo (JPG, PNG) or video (MP4, MOV) and send!
   - Your photo will appear on the family display right away.
 
-  - Want to schedule it for a special date? Put the date in the subject line:
-      Subject: Happy Birthday Mom May 10
-      Subject: Merry Christmas 2026-12-25
-      Subject: Anniversary June 15
-
   - Want to add a caption? The first sentence of your email becomes the \
 caption shown under the photo.
+
+SENDING A BIRTHDAY (OR ANNIVERSARY) GREETING — plan ahead!
+You don't have to remember on the day. Email your photo a few days early
+(say 3 days before) and put the person's name and date in the subject line:
+
+      Subject: Happy Birthday, Mom Sept 4
+
+Your greeting is saved and shown FIRST THING on the morning of Sept 4 —
+together with everyone else's greetings for that day, and favourite photos
+that feature the birthday person. Other date formats work too:
+
+      Subject: Merry Christmas 2026-12-25
+      Subject: Happy Anniversary, Mom & Dad June 15
 
 We'd love to see your photos up on the screen. Send as many as you like!
 
@@ -600,6 +608,44 @@ def send_annual_invites(config):
     _save_invite_log(invite_log)
 
     print(f"[Selah] Sent {sent_count} annual invites for {current_year}")
+
+
+def send_invitations(config, recipients=None):
+    """Send the photo-submission invitation on demand (the "nudge" button).
+
+    recipients defaults to the full approved-senders list. Returns the number
+    of invitations actually sent. Safe to call from the config GUI.
+    """
+    owner = config.get("email_address", "")
+    if not owner or not config.get("email_password"):
+        log_error("Cannot send invitations: email_address/password not configured")
+        return 0
+
+    if recipients is None:
+        recipients = load_approved_senders()
+
+    sent = 0
+    for sender_email in recipients:
+        sender_email = (sender_email or "").strip()
+        if not sender_email or sender_email == owner:
+            continue
+        try:
+            name = sender_email.split("@")[0].replace(".", " ").replace("_", " ").title()
+            body = ANNUAL_INVITE_BODY.replace("{name}", name).replace("{email}", owner)
+            msg = MIMEText(body)
+            msg["Subject"] = ANNUAL_INVITE_SUBJECT
+            msg["From"] = owner
+            msg["To"] = sender_email
+
+            with smtplib.SMTP(config["smtp_server"], config["smtp_port"]) as server:
+                server.starttls()
+                server.login(owner, config["email_password"])
+                server.send_message(msg)
+            sent += 1
+            print(f"[Selah] Sent invitation to {sender_email}")
+        except Exception as e:
+            log_error(f"Failed to send invitation to {sender_email}: {e}")
+    return sent
 
 
 def _load_invite_log():

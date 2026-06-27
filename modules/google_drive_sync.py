@@ -271,10 +271,14 @@ def _pull_one_folder(service, folder_id, config, downloaded, new_files):
 # PUSH — Backup local media to Google Drive
 # ---------------------------------------------------------------------------
 
-def push_to_drive(config, file_paths=None):
+def push_to_drive(config, file_paths=None, max_uploads=None):
     """
     Upload local media files to the configured Google Drive folder.
     If file_paths is None, scans all media directories for files not yet uploaded.
+
+    max_uploads caps how many files this call uploads (None = unlimited). The
+    live display loop passes a small cap so a huge first-time backup is spread
+    over many cycles instead of freezing the slideshow; sync_now.py passes None.
 
     Returns the count of newly uploaded files.
     """
@@ -335,6 +339,8 @@ def push_to_drive(config, file_paths=None):
             }
             upload_count += 1
             print(f"[Drive Sync] Uploaded: {file_name} (ID: {result['id']})")
+            if max_uploads and upload_count >= max_uploads:
+                break
         except Exception as e:
             log_error(f"Failed to upload {file_path}: {e}", config=config)
 
@@ -363,7 +369,9 @@ def sync_drive(config, screens=None):
     Returns (new_downloaded, new_uploaded) counts.
     """
     new_files = pull_from_drive(config, screens)
-    uploaded_count = push_to_drive(config)
+    # Cap uploads per cycle so a huge first-time backup is spread over many
+    # cycles instead of freezing the slideshow. sync_now.py uploads unlimited.
+    uploaded_count = push_to_drive(config, max_uploads=config.get("drive_upload_batch", 200))
     return len(new_files), uploaded_count
 
 

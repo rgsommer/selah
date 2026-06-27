@@ -9,6 +9,7 @@ Key design principles:
 
 import os
 import time
+import random
 import subprocess
 import pygame
 from modules.logger import log_error
@@ -338,3 +339,137 @@ def _draw_overlay(screen, file_path, config, file_date=None, caption=None):
 
     except Exception as e:
         log_error(f"Overlay draw failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Layout variety — full single / tile-3 / tile-6 with crossfade transitions
+# ---------------------------------------------------------------------------
+
+_LAYOUT_COUNTS = {"single": 1, "tile3": 3, "tile6": 6}
+
+
+def layout_file_count(mode):
+    """How many images a layout mode consumes."""
+    return _LAYOUT_COUNTS.get(mode, 1)
+
+
+def pick_layout_mode(config):
+    """Randomly choose a layout for this rotation, weighted by config.
+
+    Returns 'single' when variety is disabled. Weights default to mostly-single
+    so the display stays calm, with occasional collages for interest.
+    """
+    if not config.get("layout_variety_enabled", True):
+        return "single"
+    weights = config.get("layout_weights", {"single": 50, "tile3": 30, "tile6": 20})
+    modes = [m for m in weights if weights.get(m, 0) > 0] or ["single"]
+    try:
+        return random.choices(modes, weights=[weights[m] for m in modes], k=1)[0]
+    except Exception:
+        return "single"
+
+
+def _scaled_image(image_path, max_w, max_h):
+    """Load and aspect-scale an image to fit within (max_w, max_h)."""
+    image = pygame.image.load(image_path)
+    iw, ih = image.get_size()
+    if iw == 0 or ih == 0:
+        return None
+    scale = min(max_w / iw, max_h / ih)
+    nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
+    return pygame.transform.smoothscale(image, (nw, nh))
+
+
+def _build_single_frame(screen, image_path, config, file_date, caption):
+    """Render one centered photo (with overlay/theme) onto an offscreen frame."""
+    w, h = screen.get_size()
+    frame = pygame.Surface((w, h))
+    frame.fill((0, 0, 0))
+    img = _scaled_image(image_path, w, h)
+    if img:
+        iw, ih = img.get_size()
+        frame.blit(img, ((w - iw) // 2, (h - ih) // 2))
+    try:
+        from modules.theme_manager import draw_theme_border
+        draw_theme_border(frame)
+    except Exception:
+        pass
+    _draw_overlay(frame, image_path, config, file_date, caption)
+    return frame
+
+
+def _build_grid_frame(screen, paths, cols, rows, config):
+    """Render a cols x rows photo collage onto an offscreen frame."""
+    w, h = screen.get_size()
+    frame = pygame.Surface((w, h))
+    frame.fill((0, 0, 0))
+    gap = max(4, w // 200)
+    cell_w = (w - gap * (cols + 1)) // cols
+    cell_h = (h - gap * (rows + 1)) // rows
+
+    n = 0
+    for r in range(rows):
+        for c in range(cols):
+            if n >= len(paths):
+                break
+            cx = gap + c * (cell_w + gap)
+            cy = gap + r * (cell_h + gap)
+            try:
+                img = _scaled_image(paths[n], cell_w, cell_h)
+                if img:
+                    iw, ih = img.get_size()
+                    frame.blit(img, (cx + (cell_w - iw) // 2, cy + (cell_h - ih) // 2))
+            except Exception as e:
+                log_error(f"Tile render failed for {paths[n]}: {e}")
+            n += 1
+
+    try:
+        from modules.theme_manager import draw_theme_border
+        draw_theme_border(frame)
+    except Exception:
+        pass
+    return frame
+
+
+def _present(screen, frame, fade=True):
+    """Blit a finished frame to the screen, optionally crossfading from the old."""
+    try:
+        if fade:
+            old = screen.copy()
+            for alpha in range(0, 256, 28):
+                frame.set_alpha(alpha)
+                screen.blit(old, (0, 0))
+                screen.blit(frame, (0, 0))
+                pygame.display.flip()
+                pygame.time.delay(16)
+            frame.set_alpha(255)
+        screen.blit(frame, (0, 0))
+        pygame.display.flip()
+    except Exception as e:
+        log_error(f"Frame present failed: {e}")
+
+
+def show_layout(screen, image_paths, config, mode, file_meta=None, fade=True):
+    """Render a layout (single / tile3 / tile6) with an optional crossfade.
+
+    image_paths must hold enough images for the mode; the caller guarantees
+    this and falls back to 'single' otherwise. file_meta=(date, caption) is
+    only used in single mode.
+    """
+    try:
+        w, h = screen.get_size()
+        portrait = h > w
+
+        if mode == "tile3":
+            cols, rows = (1, 3) if portrait else (3, 1)
+            frame = _build_grid_frame(screen, image_paths, cols, rows, config)
+        elif mode == "tile6":
+            cols, rows = (2, 3) if portrait else (3, 2)
+            frame = _build_grid_frame(screen, image_paths, cols, rows, config)
+        else:
+            date, cap = file_meta or (None, None)
+            frame = _build_single_frame(screen, image_paths[0], config, date, cap)
+
+        _present(screen, frame, fade=fade and config.get("layout_fade_enabled", True))
+    except Exception as e:
+        log_error(f"show_layout failed ({mode}): {e}")

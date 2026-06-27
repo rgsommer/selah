@@ -1,7 +1,27 @@
 """Display on/off scheduling based on configured times."""
 
+import os
+import time
 import datetime
 from modules.logger import log_error
+
+
+def apply_timezone(config):
+    """Apply the configured timezone process-wide so all local times use it.
+
+    Setting TZ + time.tzset() makes datetime.now()/localtime honor the zone
+    (e.g. "America/Toronto" = Eastern with automatic DST) without needing root
+    to change the system clock. Call once at startup.
+    """
+    tz = config.get("timezone", "")
+    if not tz:
+        return
+    try:
+        os.environ["TZ"] = tz
+        time.tzset()
+        print(f"[Selah] Timezone set to {tz} (current local time {datetime.datetime.now():%Y-%m-%d %H:%M})")
+    except Exception as e:
+        log_error(f"Failed to apply timezone '{tz}': {e}")
 
 
 def is_display_off(current_time, config):
