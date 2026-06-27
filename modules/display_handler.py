@@ -380,6 +380,42 @@ def _scaled_image(image_path, max_w, max_h):
     return pygame.transform.smoothscale(image, (nw, nh))
 
 
+def _apply_effect(surf, effect):
+    """Return a sepia or black & white version of a surface (best-effort)."""
+    if not hasattr(pygame.transform, "grayscale"):
+        return surf  # older pygame without grayscale — skip gracefully
+    try:
+        gray = pygame.transform.grayscale(surf)
+        if effect == "bw":
+            return gray
+        if effect == "sepia":
+            tint = gray.copy()
+            # Multiply the gray image by a warm tone -> sepia.
+            tint.fill((255, 204, 153), special_flags=pygame.BLEND_RGB_MULT)
+            return tint
+    except Exception:
+        pass
+    return surf
+
+
+def _maybe_effect(surf, config):
+    """Randomly apply sepia/B&W to a photo, per the configured chance."""
+    if surf is None or not config.get("photo_effects_enabled", False):
+        return surf
+    try:
+        if random.randint(1, 100) <= int(config.get("photo_effect_chance", 15)):
+            choices = []
+            if config.get("photo_effect_sepia", True):
+                choices.append("sepia")
+            if config.get("photo_effect_bw", True):
+                choices.append("bw")
+            if choices:
+                return _apply_effect(surf, random.choice(choices))
+    except Exception:
+        pass
+    return surf
+
+
 def _build_single_frame(screen, image_path, config, file_date, caption):
     """Render one centered photo (with overlay/theme) onto an offscreen frame."""
     w, h = screen.get_size()
@@ -387,6 +423,7 @@ def _build_single_frame(screen, image_path, config, file_date, caption):
     frame.fill((0, 0, 0))
     img = _scaled_image(image_path, w, h)
     if img:
+        img = _maybe_effect(img, config)
         iw, ih = img.get_size()
         frame.blit(img, ((w - iw) // 2, (h - ih) // 2))
     try:
@@ -417,6 +454,7 @@ def _build_grid_frame(screen, paths, cols, rows, config):
             try:
                 img = _scaled_image(paths[n], cell_w, cell_h)
                 if img:
+                    img = _maybe_effect(img, config)
                     iw, ih = img.get_size()
                     frame.blit(img, (cx + (cell_w - iw) // 2, cy + (cell_h - ih) // 2))
             except Exception as e:

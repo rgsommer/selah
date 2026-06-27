@@ -274,6 +274,10 @@ def show_config_gui(screen, config):
             ("tile3", "  Layout: Tile 3", "layoutbool"),
             ("tile6", "  Layout: Tile 6", "layoutbool"),
             ("layout_fade_enabled", "  Fade Transitions", "bool"),
+            ("photo_effects_enabled", "Photo Effects (random)", "bool"),
+            ("photo_effect_chance", "  Effect Chance (%)", "int"),
+            ("photo_effect_sepia", "  Use Sepia", "bool"),
+            ("photo_effect_bw", "  Use B&W", "bool"),
             ("rotate_interval", "Rotate Interval (sec)", "int"),
 
             # --- Daily schedule ---
