@@ -648,6 +648,65 @@ def send_invitations(config, recipients=None):
     return sent
 
 
+DIGEST_LOG_FILE = "digest_log.json"
+
+
+def send_weekly_digest(config):
+    """Once a week, email the owner a short summary of newly added photos.
+
+    Self-throttles: only on weekly_digest_weekday (0=Mon..6=Sun), once per ISO
+    week. Reports growth in media_log since the previous digest.
+    """
+    if not config.get("weekly_digest_enabled", False):
+        return
+    owner = config.get("email_address", "")
+    if not owner or not config.get("email_password"):
+        return
+
+    now = datetime.datetime.now()
+    if now.weekday() != int(config.get("weekly_digest_weekday", 6)):
+        return
+    week = now.strftime("%G-W%V")
+
+    last = {}
+    try:
+        if os.path.exists(DIGEST_LOG_FILE):
+            with open(DIGEST_LOG_FILE) as f:
+                last = json.load(f)
+    except Exception:
+        last = {}
+    if last.get("week") == week:
+        return
+
+    try:
+        with open("media_log.json") as f:
+            total = len(json.load(f))
+    except Exception:
+        total = 0
+    new_count = max(0, total - int(last.get("total", total)))
+
+    body = (
+        "Hi!\n\nHere's your Selah weekly update:\n\n"
+        f"  - {new_count} new photo(s) added this week.\n"
+        f"  - {total} photos in the display in total.\n\n"
+        "Keep the memories coming!\n\n- Selah"
+    )
+    try:
+        msg = MIMEText(body)
+        msg["Subject"] = "Selah: your week in photos"
+        msg["From"] = owner
+        msg["To"] = owner
+        with smtplib.SMTP(config["smtp_server"], config["smtp_port"]) as server:
+            server.starttls()
+            server.login(owner, config["email_password"])
+            server.send_message(msg)
+        with open(DIGEST_LOG_FILE, "w") as f:
+            json.dump({"week": week, "total": total, "sent": now.isoformat()}, f)
+        print(f"[Selah] Sent weekly digest ({new_count} new)")
+    except Exception as e:
+        log_error(f"Weekly digest send failed: {e}")
+
+
 def _load_invite_log():
     """Load the invite log tracking when invites were last sent."""
     try:

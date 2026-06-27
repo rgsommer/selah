@@ -26,7 +26,7 @@ sudo apt install -y python3 python3-pip python3-dev python3-venv libatlas-base-d
     python3-google-auth-httplib2 python3-pil
 
 # Install Python packages
-pip3 install --user pygame face_recognition Pillow google-api-python-client oauthlib requests-oauthlib
+pip3 install --user pygame face_recognition Pillow google-api-python-client oauthlib requests-oauthlib qrcode
 
 # Install Raspberry Pi camera support
 sudo apt install -y libcamera-apps-lite

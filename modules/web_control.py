@@ -53,6 +53,7 @@ DASHBOARD_HTML = """
         <button class="btn" onclick="send('pause')">Pause</button>
         <button class="btn" onclick="send('resume')">Resume</button>
         <button class="btn" onclick="send('next')">Next</button>
+        <button class="btn" onclick="send('favorite')">&#10084; Favorite</button>
     </div>
     <div class="status" id="status">Loading status...</div>
     <div class="upload-form">
@@ -130,6 +131,21 @@ def start_web_server(config, screens):
     def previous_image():
         _shared_state["command_queue"].append("previous")
         return jsonify({"message": "Going to previous image"})
+
+    @_app.route("/favorite", methods=["POST"])
+    def favorite():
+        try:
+            import os
+            from modules.now_showing import get_current
+            from modules.favorites import add_favorite
+            path = get_current()
+            if not path:
+                return jsonify({"message": "Nothing on screen yet"})
+            if add_favorite(path):
+                return jsonify({"message": f"❤ Favorited {os.path.basename(path)}"})
+            return jsonify({"message": "Already a favorite"})
+        except Exception as e:
+            return jsonify({"message": f"Error: {e}"})
 
     @_app.route("/pause", methods=["POST"])
     def pause():

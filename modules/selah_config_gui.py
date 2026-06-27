@@ -305,6 +305,15 @@ def show_config_gui(screen, config):
             ("photo_effect_chance", "  Effect Chance (%)", "int"),
             ("photo_effect_sepia", "  Use Sepia", "bool"),
             ("photo_effect_bw", "  Use B&W", "bool"),
+            ("recent_memory_enabled", "Avoid Repeats (recent memory)", "bool"),
+            ("on_this_day_enabled", "On-This-Day Flashbacks", "bool"),
+            ("upload_qr_enabled", "Phone Upload QR", "bool"),
+            ("coming_up_enabled", "Coming-Up Birthday Heads-Up", "bool"),
+            ("favorites_boost_enabled", "Boost Favorites", "bool"),
+            ("privacy_mode_enabled", "Guest/Privacy Mode", "bool"),
+            ("hide_blurry_enabled", "Hide Blurry Photos", "bool"),
+            ("weekly_digest_enabled", "Weekly Digest Email", "bool"),
+            ("health_watchdog_enabled", "Health Watchdog (disk)", "bool"),
             ("rotate_interval", "Rotate Interval (sec)", "int"),
 
             # --- Daily schedule ---

@@ -135,6 +135,10 @@ def get_images_and_videos(config):
                      [".jpg", ".jpeg", ".png", ".mp4", ".avi", ".mov"])]
         image_ext = [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"]
 
+        # Guest/privacy mode: when on, hide files under any "private" folder.
+        privacy_on = config.get("privacy_mode_enabled", False)
+        private_tokens = [str(t).lower() for t in config.get("private_dirs", ["private"])]
+
         def collect_files(folder, forced_list_by_folder=None, orientation=None):
             """Collect media files from a folder.
 
@@ -149,6 +153,10 @@ def get_images_and_videos(config):
                 if path.suffix.lower() not in valid_ext:
                     continue
                 filepath = str(path)
+
+                # Skip private content while guest/privacy mode is on.
+                if privacy_on and any(tok in filepath.lower() for tok in private_tokens):
+                    continue
 
                 # Determine the grouping key: the immediate subfolder under
                 # the scanned folder, or the folder itself if file is at root
@@ -200,6 +208,14 @@ def get_images_and_videos(config):
         # Remove duplicates while preserving order
         portrait_files = list(dict.fromkeys(portrait_files))
         landscape_files = list(dict.fromkeys(landscape_files))
+
+        # Optionally drop out-of-focus photos (cached; no-op unless enabled).
+        try:
+            from modules import quality
+            portrait_files = quality.filter_sharp(portrait_files, config)
+            landscape_files = quality.filter_sharp(landscape_files, config)
+        except Exception as e:
+            log_error(f"Blur filter failed: {e}")
 
         # Persist orientation cache to disk so next startup is fast
         _save_orientation_cache()

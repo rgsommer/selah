@@ -36,3 +36,10 @@ recordings/
 # Local demo / venv
 .venv/
 *.demobak
+
+# Device-local state (contacts, favorites, caches)
+contacts.json
+favorites.json
+photo_dates.json
+quality_cache.json
+digest_log.json

@@ -44,6 +44,11 @@ from modules.quiz_mode import start_quiz_mode
 from modules.web_control import start_web_server
 from modules.google_drive_sync import sync_drive
 from modules.special_days import check_special_days, prioritize_for_today
+from modules.on_this_day import todays_flashbacks
+from modules.upload_qr import show_upload_qr_if_scheduled
+from modules.now_showing import set_current as _set_now_showing
+from modules.favorites import prioritize_favorites
+from modules.coming_up import show_coming_up_if_scheduled
 
 
 def _load_media_log():
@@ -74,13 +79,106 @@ def _display_file(screen, file_path, config, file_date=None, caption=None):
         show_image(screen, file_path, config, file_date, caption)
 
 
+def _recent_store(state):
+    """Shared 'recently shown' memory (set for lookup + deque for ordering)."""
+    r = state.get("_recent")
+    if r is None:
+        from collections import deque
+        r = {"set": set(), "order": deque()}
+        state["_recent"] = r
+    return r
+
+
+def _recent_cap(config, total):
+    """How many recent photos to remember before one may repeat."""
+    cap = int(config.get("recent_memory", 0) or 0)
+    if cap > 0:
+        return cap
+    # Auto: ~40% of the library, bounded so it stays cheap.
+    return min(500, max(20, int(total * 0.4)))
+
+
+def _is_recent(state, path):
+    return path in _recent_store(state)["set"]
+
+
+def _mark_shown(state, paths, config, total):
+    r = _recent_store(state)
+    cap = _recent_cap(config, total)
+    for p in paths:
+        if p not in r["set"]:
+            r["set"].add(p)
+            r["order"].append(p)
+    while len(r["order"]) > cap:
+        r["set"].discard(r["order"].popleft())
+
+
+def _health_check(config):
+    """Email the owner if disk space runs low (logger emails critical errors)."""
+    import shutil
+    try:
+        total, _used, free = shutil.disk_usage(config.get("media_folder", "."))
+        pct_free = free * 100 // max(1, total)
+        if pct_free < int(config.get("disk_warn_percent", 10)):
+            log_error(f"Low disk space: {pct_free}% free on the Selah Pi", critical=True, config=config)
+    except Exception as e:
+        log_error(f"Health check failed: {e}")
+
+
+def _check_flashbacks(state, config, portrait_files, landscape_files, screens):
+    """Once each morning, queue 'on this day' photos to play first and toast the years."""
+    if not config.get("on_this_day_enabled", True):
+        return
+    today = datetime.date.today().isoformat()
+    if state.get("flashback_date") == today:
+        return
+    if datetime.datetime.now().strftime("%H:%M") < config.get("on_time", "06:00"):
+        return
+    state["flashback_date"] = today
+
+    files = list(dict.fromkeys(portrait_files + landscape_files))
+    try:
+        fb = todays_flashbacks(files, config)
+    except Exception as e:
+        log_error(f"Flashback scan failed: {e}")
+        return
+    if not fb:
+        return
+
+    from collections import deque
+    fb_sorted = sorted(fb, key=lambda x: -x[1])[:20]  # most recent years first
+    state["flashback_queue"] = deque(fb_sorted)
+    years = ", ".join(str(y) for y in sorted({y for _, y in fb_sorted}))
+    show_toast_if_needed(screens, config, f"On this day: {years}")
+
+
 def _render_screen(screen, screen_type, files, state, config, media_log):
     """Render the next slideshow frame for one screen, with random layout variety.
 
     Picks a layout (single / tile3 / tile6) per rotation; videos always play
-    full-screen. Advances the screen's index by the number of files consumed.
+    full-screen. Skips recently-shown photos so the same shots don't repeat too
+    soon. Advances the screen's index by the number of files consumed.
     """
+    # On-this-day flashbacks (queued in the morning) play first, one per frame.
+    fbq = state.get("flashback_queue")
+    if fbq and config.get("on_this_day_enabled", True):
+        path, year = fbq.popleft()
+        if os.path.exists(path) and not path.lower().endswith(VIDEO_EXTS):
+            fd, cap = _get_media_metadata(path, media_log)
+            label = f"On this day, {year}" + (f" — {cap}" if cap else "")
+            show_layout(screen, [path], config, "single", file_meta=(str(year), label))
+            _set_now_showing(path)
+            _mark_shown(state, [path], config, len(files))
+            return
+
     idx = state[screen_type]["index"] % len(files)
+
+    # Skip ahead past recently-shown photos (bounded so we always make progress).
+    if config.get("recent_memory_enabled", True):
+        scanned = 0
+        while _is_recent(state, files[idx]) and scanned < len(files):
+            idx = (idx + 1) % len(files)
+            scanned += 1
     first = files[idx]
 
     mode = pick_layout_mode(config)
@@ -93,27 +191,43 @@ def _render_screen(screen, screen_type, files, state, config, media_log):
             show_video(screen, first, config, file_date, caption)
         else:
             show_layout(screen, [first], config, "single", file_meta=(file_date, caption))
+        _set_now_showing(first)
+        _mark_shown(state, [first], config, len(files))
         state[screen_type]["index"] = (idx + 1) % len(files)
         return
 
-    # Tile modes: gather N images (skipping videos), starting at idx.
+    # Tile modes: gather N images (skipping videos and recently-shown), from idx.
     need = layout_file_count(mode)
+    skip_recent = config.get("recent_memory_enabled", True)
     picks, i, scanned = [], idx, 0
     while len(picks) < need and scanned < len(files):
         f = files[i % len(files)]
-        if not f.lower().endswith(VIDEO_EXTS):
+        if not f.lower().endswith(VIDEO_EXTS) and not (skip_recent and _is_recent(state, f)):
             picks.append(f)
         i += 1
         scanned += 1
+    # If recency filtering starved us, retry allowing recent images.
+    if len(picks) < need:
+        picks, i, scanned = [], idx, 0
+        while len(picks) < need and scanned < len(files):
+            f = files[i % len(files)]
+            if not f.lower().endswith(VIDEO_EXTS):
+                picks.append(f)
+            i += 1
+            scanned += 1
 
     if len(picks) < need:
         # Not enough images for a collage — fall back to a single photo.
         f = picks[0] if picks else first
         fd, cap = _get_media_metadata(f, media_log)
         show_layout(screen, [f], config, "single", file_meta=(fd, cap))
+        _set_now_showing(f)
+        _mark_shown(state, [f], config, len(files))
         state[screen_type]["index"] = (idx + 1) % len(files)
     else:
         show_layout(screen, picks, config, mode)
+        _set_now_showing(picks[0])
+        _mark_shown(state, picks, config, len(files))
         state[screen_type]["index"] = i % len(files)
 
 
@@ -153,6 +267,9 @@ def main():
         # Bias toward the birthday/anniversary person's photos if today is theirs.
         portrait_files = prioritize_for_today(portrait_files, config)
         landscape_files = prioritize_for_today(landscape_files, config)
+        # Favorited photos appear more often.
+        portrait_files = prioritize_favorites(portrait_files, config)
+        landscape_files = prioritize_favorites(landscape_files, config)
 
         print(f"[Selah] Found {len(portrait_files)} portrait and {len(landscape_files)} landscape files")
 
@@ -174,6 +291,8 @@ def main():
         last_email_check = 0
         last_media_refresh = 0
         last_drive_sync = 0
+        last_health_check = 0
+        health_check_interval = 3600  # disk check hourly
         email_check_interval = 60  # Check email every 60 seconds
         media_refresh_interval = 120  # Refresh file list every 2 minutes
         drive_sync_interval = config.get("drive_sync_interval", 300)
@@ -198,6 +317,9 @@ def main():
             # Self-throttles to one scan/minute and one celebration/day.
             if config.get("special_days_enabled", False):
                 check_special_days(screens, config, state)
+
+            # On-this-day flashbacks — queue once each morning.
+            _check_flashbacks(state, config, portrait_files, landscape_files, screens)
 
             # Handle keyboard/touch events (also processes ESC to exit)
             try:
@@ -277,7 +399,19 @@ def main():
                     send_annual_invites(config)
                 except Exception as e:
                     log_error(f"Annual invite check failed: {e}")
+                # Weekly digest email (self-throttles to once per week).
+                if config.get("weekly_digest_enabled", False):
+                    try:
+                        from modules.email_handler import send_weekly_digest
+                        send_weekly_digest(config)
+                    except Exception as e:
+                        log_error(f"Weekly digest check failed: {e}")
                 last_email_check = current_ts
+
+            # ---- HEALTH WATCHDOG (disk space, throttled) ----
+            if config.get("health_watchdog_enabled", False) and current_ts - last_health_check > health_check_interval:
+                _health_check(config)
+                last_health_check = current_ts
 
             # ---- GOOGLE DRIVE SYNC (throttled) ----
             if config.get("cloud_backup_enabled", False) and current_ts - last_drive_sync > drive_sync_interval:
@@ -303,6 +437,7 @@ def main():
                         portrait_files = new_portrait
                         shuffle(portrait_files)
                         portrait_files = prioritize_for_today(portrait_files, config)
+                        portrait_files = prioritize_favorites(portrait_files, config)
                         if current_p and current_p in portrait_files:
                             state["portrait"]["index"] = portrait_files.index(current_p)
                         else:
@@ -312,6 +447,7 @@ def main():
                         landscape_files = new_landscape
                         shuffle(landscape_files)
                         landscape_files = prioritize_for_today(landscape_files, config)
+                        landscape_files = prioritize_favorites(landscape_files, config)
                         if current_l and current_l in landscape_files:
                             state["landscape"]["index"] = landscape_files.index(current_l)
                         else:
@@ -386,6 +522,14 @@ def main():
             # Drawn last so it sits on top of the freshly rendered photo.
             if config.get("status_line_enabled", False):
                 show_status_line(screens, config)
+
+            # ---- PHONE-UPLOAD QR (periodic corner overlay) ----
+            if config.get("upload_qr_enabled", False):
+                show_upload_qr_if_scheduled(screens, config)
+
+            # ---- "COMING UP" birthday heads-up (periodic) ----
+            if config.get("coming_up_enabled", False):
+                show_coming_up_if_scheduled(screens, config)
 
             time.sleep(rotate_interval)
 
