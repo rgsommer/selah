@@ -10,7 +10,7 @@ except ImportError:
     HAS_FACE_RECOGNITION = False
 
 _known_encodings = {}
-_face_cache = {}
+_encoding_cache = {}  # filepath -> list of face encodings (the expensive part)
 
 
 def prioritize_images(file_list, config):
@@ -97,38 +97,42 @@ def _load_known_faces(known_faces_dir):
         log_error(f"Failed to load known faces: {e}")
 
 
-def _score_image(filepath, priority_person=None):
-    """Score an image based on face content. Higher = more priority."""
-    global _face_cache
+def _get_encodings(filepath):
+    """Return cached face encodings for an image (detect once, reuse forever).
 
-    if filepath in _face_cache:
-        return _face_cache[filepath]
-
+    Detection (face_locations + face_encodings) is the expensive step, so we
+    cache it per file. The priority match is computed cheaply from these, which
+    means changing priority_person (e.g. a new birthday) costs nothing to
+    re-evaluate — no re-detection.
+    """
+    global _encoding_cache
+    if filepath in _encoding_cache:
+        return _encoding_cache[filepath]
     try:
         image = face_recognition.load_image_file(filepath)
-        face_locations = face_recognition.face_locations(image, model="hog")
+        locations = face_recognition.face_locations(image, model="hog")
+        encodings = face_recognition.face_encodings(image, locations) if locations else []
+        _encoding_cache[filepath] = encodings
+        return encodings
+    except Exception:
+        _encoding_cache[filepath] = []
+        return []
 
-        if not face_locations:
-            _face_cache[filepath] = 0
-            return 0
 
-        score = len(face_locations)  # More faces = slightly higher base score
-
-        if priority_person and _known_encodings:
-            face_encodings = face_recognition.face_encodings(image, face_locations)
-            target_encoding = _known_encodings.get(priority_person.lower())
-            if target_encoding is not None:
-                for encoding in face_encodings:
-                    matches = face_recognition.compare_faces(
-                        [target_encoding], encoding, tolerance=0.6
-                    )
-                    if matches[0]:
-                        score += 5  # Big boost for priority person
-                        break
-
-        _face_cache[filepath] = score
-        return score
-
-    except Exception as e:
-        _face_cache[filepath] = 0
+def _score_image(filepath, priority_person=None):
+    """Score an image by face content. Higher = more priority."""
+    encodings = _get_encodings(filepath)
+    if not encodings:
         return 0
+
+    score = len(encodings)  # more faces = slightly higher base score
+
+    if priority_person and _known_encodings:
+        target = _known_encodings.get(priority_person.lower())
+        if target is not None:
+            for encoding in encodings:
+                if face_recognition.compare_faces([target], encoding, tolerance=0.6)[0]:
+                    score += 5  # big boost for the priority person
+                    break
+
+    return score

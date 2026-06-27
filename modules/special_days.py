@@ -180,9 +180,11 @@ def check_special_days(screens, config, state=None):
     if not days:
         _active_keywords = []
         _active_keywords_date = today
+        # No birthday today — stop boosting anyone by face.
+        config["priority_person"] = None
         return
 
-    # Arm photo keywords for the day.
+    # Arm photo keywords for the day (filename-based biasing).
     keywords = []
     for d in days:
         kw = str(d.get("photo_keyword", "")).strip().lower()
@@ -190,6 +192,17 @@ def check_special_days(screens, config, state=None):
             keywords.append(kw)
     _active_keywords = keywords
     _active_keywords_date = today
+
+    # Face-based biasing: point face recognition at today's birthday person so
+    # their photos surface even when filenames don't contain their name. Needs
+    # enable_face_recognition + a labeled image at known_faces/<keyword>.jpg.
+    person = None
+    for d in days:
+        if (d.get("type") or "").lower() == "birthday":
+            person = (d.get("photo_keyword") or "").strip().lower() or None
+            if person:
+                break
+    config["priority_person"] = person
 
     for d in days:
         msg = d.get("message") or _default_message(d, now.date())
