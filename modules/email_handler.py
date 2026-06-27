@@ -305,6 +305,12 @@ Here's how it works:
   - Want to add a caption? The first sentence of your email becomes the \
 caption shown under the photo.
 
+PREFER NOT TO EMAIL?
+You can also upload photos straight to our shared family Google Drive folder —
+just drop them into the subfolder with your name on it. (Reply to this email
+and we'll send you the folder link.) Dated filenames work there too, e.g. name
+a photo "Happy Birthday, Mom Sept 4.jpg".
+
 SENDING A BIRTHDAY (OR ANNIVERSARY) GREETING — plan ahead!
 You don't have to remember on the day. Email your photo a few days early
 (say 3 days before) and put the person's name and date in the subject line:

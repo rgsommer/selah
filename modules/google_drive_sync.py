@@ -268,6 +268,156 @@ def _pull_one_folder(service, folder_id, config, downloaded, new_files):
 
 
 # ---------------------------------------------------------------------------
+# Family/Friends folder — a shared Drive folder others upload to
+# ---------------------------------------------------------------------------
+
+FAMILY_DIR = "media/family"
+
+
+def _clean_id(raw):
+    """Accept a raw folder ID or a pasted Drive share link."""
+    s = (raw or "").strip()
+    if "/folders/" in s:
+        s = s.split("/folders/")[1]
+    elif "id=" in s:
+        s = s.split("id=")[1]
+    return s.split("?")[0].split("/")[0]
+
+
+def pull_family_folder(config):
+    """Pull the Family/Friends Drive folder into media/family/, preserving each
+    contributor's subfolder. Files whose name carries a date are scheduled to
+    show on that day (recurring or one-year, per family_folder_recurring)
+    instead of joining the normal rotation. Returns newly downloaded paths.
+    """
+    if not config.get("family_folder_enabled", False):
+        return []
+    fid = _clean_id(config.get("family_folder_id"))
+    if not fid or fid in ("your_folder_id", "your_drive_folder_id"):
+        return []
+    service = get_drive_service(config)
+    if not service:
+        return []
+
+    sync_state = load_sync_state()
+    downloaded = sync_state.get("downloaded", {})
+    new_files = []
+    recurring = config.get("family_folder_recurring", True)
+    try:
+        _pull_family_recursive(service, fid, "", config, downloaded, new_files, recurring)
+    except Exception as e:
+        log_error(f"Family folder pull failed: {e}", config=config)
+
+    sync_state["downloaded"] = downloaded
+    save_sync_state(sync_state)
+    if new_files:
+        print(f"[Drive Sync] Family folder: {len(new_files)} new file(s)")
+    return new_files
+
+
+def _pull_family_recursive(service, folder_id, subpath, config, downloaded, new_files, recurring):
+    page_token = None
+    while True:
+        resp = service.files().list(
+            q=f"'{folder_id}' in parents and trashed=false",
+            spaces="drive",
+            fields="nextPageToken, files(id, name, mimeType)",
+            pageToken=page_token, pageSize=100,
+        ).execute()
+
+        for f in resp.get("files", []):
+            mime = f.get("mimeType", "")
+            name = f.get("name", "")
+            if mime == "application/vnd.google-apps.folder":
+                _pull_family_recursive(service, f["id"], os.path.join(subpath, name),
+                                       config, downloaded, new_files, recurring)
+                continue
+            if mime not in ALL_MEDIA_MIMES:
+                continue
+            file_id = f["id"]
+            if file_id in downloaded:
+                continue
+
+            ext = ALL_MEDIA_MIMES.get(mime, "")
+            if not name.lower().endswith(tuple(ALL_MEDIA_MIMES.values())):
+                name = os.path.splitext(name)[0] + ext
+
+            dest_dir = Path(FAMILY_DIR) / subpath if subpath else Path(FAMILY_DIR)
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest_path = dest_dir / name
+            if dest_path.exists():
+                b, e = os.path.splitext(name)
+                dest_path = dest_dir / f"{b}_{file_id[:8]}{e}"
+
+            try:
+                req = service.files().get_media(fileId=file_id)
+                with open(dest_path, "wb") as fh:
+                    dl = MediaIoBaseDownload(fh, req)
+                    done = False
+                    while not done:
+                        _, done = dl.next_chunk()
+                downloaded[file_id] = {
+                    "local_path": str(dest_path), "name": name,
+                    "downloaded_at": datetime.datetime.now().isoformat(),
+                }
+                new_files.append(str(dest_path))
+
+                # Date in the filename -> schedule it for its day.
+                try:
+                    from modules.scheduled_media import parse_filename, add_scheduled
+                    mmdd, iso, cap = parse_filename(name)
+                    if mmdd:
+                        add_scheduled(str(dest_path), mmdd, caption=cap,
+                                      recurring=recurring, target_iso=iso)
+                except Exception as e:
+                    log_error(f"Schedule parse failed for {name}: {e}")
+            except Exception as e:
+                log_error(f"Failed to download family file {name}: {e}", config=config)
+
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+
+
+def ensure_family_subfolders(config):
+    """Create a subfolder per contact inside the family folder (best-effort)."""
+    if not config.get("family_folder_enabled", False):
+        return
+    fid = _clean_id(config.get("family_folder_id"))
+    if not fid:
+        return
+    service = get_drive_service(config)
+    if not service:
+        return
+    try:
+        from modules.contacts import load_contacts
+        names = [(c.get("name") or (c.get("email", "").split("@")[0])) for c in load_contacts()]
+    except Exception:
+        names = []
+    names = [n for n in names if n]
+    if not names:
+        return
+    try:
+        existing = set()
+        resp = service.files().list(
+            q=(f"'{fid}' in parents and "
+               "mimeType='application/vnd.google-apps.folder' and trashed=false"),
+            fields="files(name)", pageSize=200).execute()
+        for f in resp.get("files", []):
+            existing.add(f.get("name", "").lower())
+        for name in names:
+            if name.lower() not in existing:
+                service.files().create(body={
+                    "name": name,
+                    "mimeType": "application/vnd.google-apps.folder",
+                    "parents": [fid],
+                }, fields="id").execute()
+                print(f"[Drive] Created family subfolder: {name}")
+    except Exception as e:
+        log_error(f"ensure_family_subfolders failed: {e}", config=config)
+
+
+# ---------------------------------------------------------------------------
 # PUSH — Backup local media to Google Drive
 # ---------------------------------------------------------------------------
 
@@ -369,6 +519,10 @@ def sync_drive(config, screens=None):
     Returns (new_downloaded, new_uploaded) counts.
     """
     new_files = pull_from_drive(config, screens)
+    # Family/Friends folder (separate source; dated files get scheduled).
+    family_new = pull_family_folder(config)
+    if family_new:
+        new_files = list(new_files) + family_new
     # Cap uploads per cycle so a huge first-time backup is spread over many
     # cycles instead of freezing the slideshow. sync_now.py uploads unlimited.
     uploaded_count = push_to_drive(config, max_uploads=config.get("drive_upload_batch", 200))

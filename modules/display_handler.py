@@ -345,7 +345,7 @@ def _draw_overlay(screen, file_path, config, file_date=None, caption=None):
 # Layout variety — full single / tile-3 / tile-6 with crossfade transitions
 # ---------------------------------------------------------------------------
 
-_LAYOUT_COUNTS = {"single": 1, "tile3": 3, "tile6": 6}
+_LAYOUT_COUNTS = {"single": 1, "split": 2, "tile3": 3, "tile6": 6}
 
 
 def layout_file_count(mode):
@@ -469,6 +469,57 @@ def _build_grid_frame(screen, paths, cols, rows, config):
     return frame
 
 
+def _build_split_frame(screen, paths, config):
+    """Two photos side by side, each filling ~50% of the width."""
+    w, h = screen.get_size()
+    frame = pygame.Surface((w, h))
+    frame.fill((0, 0, 0))
+    half = w // 2
+    cells = [(0, 0, half, h), (half, 0, w - half, h)]
+    for idx, (cx, cy, cw, ch) in enumerate(cells):
+        if idx >= len(paths):
+            break
+        try:
+            img = _scaled_image(paths[idx], cw, ch)
+            if img:
+                img = _maybe_effect(img, config)
+                iw, ih = img.get_size()
+                frame.blit(img, (cx + (cw - iw) // 2, cy + (ch - ih) // 2))
+        except Exception as e:
+            log_error(f"Split render failed for {paths[idx]}: {e}")
+    try:
+        from modules.theme_manager import draw_theme_border
+        draw_theme_border(frame)
+    except Exception:
+        pass
+    return frame
+
+
+def _present_split(screen, new_frame, animate=True):
+    """Transition for split mode: the two old halves slide off opposite ways,
+    revealing the new split underneath."""
+    try:
+        if animate:
+            w, h = screen.get_size()
+            half = w // 2
+            old = screen.copy()
+            left = old.subsurface((0, 0, half, h)).copy()
+            right = old.subsurface((half, 0, w - half, h)).copy()
+            step = max(2, half // 14)
+            dx = 0
+            while dx < half:
+                screen.blit(new_frame, (0, 0))
+                screen.blit(left, (-dx, 0))           # left half exits left
+                screen.blit(right, (half + dx, 0))    # right half exits right
+                pygame.display.flip()
+                pygame.time.delay(16)
+                dx += step
+        screen.blit(new_frame, (0, 0))
+        pygame.display.flip()
+    except Exception as e:
+        log_error(f"Split transition failed: {e}")
+
+
 def _present(screen, frame, fade=True):
     """Blit a finished frame to the screen, optionally crossfading from the old."""
     try:
@@ -498,7 +549,11 @@ def show_layout(screen, image_paths, config, mode, file_meta=None, fade=True):
         w, h = screen.get_size()
         portrait = h > w
 
-        if mode == "tile3":
+        if mode == "split":
+            frame = _build_split_frame(screen, image_paths, config)
+            _present_split(screen, frame, animate=fade and config.get("layout_fade_enabled", True))
+            return
+        elif mode == "tile3":
             cols, rows = (1, 3) if portrait else (3, 1)
             frame = _build_grid_frame(screen, image_paths, cols, rows, config)
         elif mode == "tile6":

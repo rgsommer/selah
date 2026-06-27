@@ -15,7 +15,7 @@ def _load_contacts():
         return []
 
 # Default weights restored when a layout checkbox is switched back ON.
-LAYOUT_DEFAULT_WEIGHTS = {"single": 50, "tile3": 30, "tile6": 20}
+LAYOUT_DEFAULT_WEIGHTS = {"single": 50, "split": 20, "tile3": 30, "tile6": 20}
 
 
 def _layout_is_on(config, mode):
@@ -298,6 +298,7 @@ def show_config_gui(screen, config):
             # --- Layout variety ---
             ("layout_variety_enabled", "Layout Variety", "bool"),
             ("single", "  Layout: Full Single", "layoutbool"),
+            ("split", "  Layout: Split (2, slide)", "layoutbool"),
             ("tile3", "  Layout: Tile 3", "layoutbool"),
             ("tile6", "  Layout: Tile 6", "layoutbool"),
             ("layout_fade_enabled", "  Fade Transitions", "bool"),
@@ -321,6 +322,7 @@ def show_config_gui(screen, config):
             ("on_time", "Photos Start (morning HH:MM)", "str"),
             ("off_time", "Photos Stop (night HH:MM)", "str"),
             ("moon_phase_enabled", "Night Moon Phase", "bool"),
+            ("night_screen_off", "Night: Blank HDMI (true dark)", "bool"),
             ("calendar_display_enabled", "Daily Agenda (calendar)", "bool"),
             ("calendar_start_time", "  Agenda Start (HH:MM)", "str"),
             ("calendar_duration_minutes", "  Agenda Duration (min, 0=all day)", "int"),
@@ -337,6 +339,9 @@ def show_config_gui(screen, config):
             # --- Photo sources ---
             ("cloud_backup_enabled", "Google Drive Sync", "bool"),
             ("google_drive_folder_ids", "Drive Folders", "drivelist"),
+            ("family_folder_enabled", "Family/Friends Folder", "bool"),
+            ("family_folder_id", "  Family Folder ID/Link", "str"),
+            ("family_folder_recurring", "  Greetings Repeat Yearly", "bool"),
 
             # --- Features ---
             ("verse_display_enabled", "Verse Display", "bool"),

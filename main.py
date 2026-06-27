@@ -126,9 +126,7 @@ def _health_check(config):
 
 
 def _check_flashbacks(state, config, portrait_files, landscape_files, screens):
-    """Once each morning, queue 'on this day' photos to play first and toast the years."""
-    if not config.get("on_this_day_enabled", True):
-        return
+    """Once each morning, queue today's scheduled greetings and on-this-day photos."""
     today = datetime.date.today().isoformat()
     if state.get("flashback_date") == today:
         return
@@ -136,20 +134,32 @@ def _check_flashbacks(state, config, portrait_files, landscape_files, screens):
         return
     state["flashback_date"] = today
 
-    files = list(dict.fromkeys(portrait_files + landscape_files))
-    try:
-        fb = todays_flashbacks(files, config)
-    except Exception as e:
-        log_error(f"Flashback scan failed: {e}")
-        return
-    if not fb:
-        return
-
     from collections import deque
-    fb_sorted = sorted(fb, key=lambda x: -x[1])[:20]  # most recent years first
-    state["flashback_queue"] = deque(fb_sorted)
-    years = ", ".join(str(y) for y in sorted({y for _, y in fb_sorted}))
-    show_toast_if_needed(screens, config, f"On this day: {years}")
+    queue = []
+
+    # Dated greetings scheduled for today (family folder / email).
+    try:
+        from modules.scheduled_media import todays_scheduled
+        for it in todays_scheduled():
+            queue.append((it["path"], it.get("caption") or "A special greeting"))
+    except Exception as e:
+        log_error(f"Scheduled media check failed: {e}")
+
+    # On-this-day flashbacks (photos from prior years).
+    if config.get("on_this_day_enabled", True):
+        files = list(dict.fromkeys(portrait_files + landscape_files))
+        try:
+            fb = todays_flashbacks(files, config)
+        except Exception as e:
+            log_error(f"Flashback scan failed: {e}")
+            fb = []
+        for path, year in sorted(fb, key=lambda x: -x[1])[:20]:
+            queue.append((path, f"On this day, {year}"))
+
+    if not queue:
+        return
+    state["flashback_queue"] = deque(queue)
+    show_toast_if_needed(screens, config, "Today's special photos")
 
 
 def _render_screen(screen, screen_type, files, state, config, media_log):
@@ -159,14 +169,12 @@ def _render_screen(screen, screen_type, files, state, config, media_log):
     full-screen. Skips recently-shown photos so the same shots don't repeat too
     soon. Advances the screen's index by the number of files consumed.
     """
-    # On-this-day flashbacks (queued in the morning) play first, one per frame.
+    # Morning queue (scheduled greetings + on-this-day) plays first, one/frame.
     fbq = state.get("flashback_queue")
-    if fbq and config.get("on_this_day_enabled", True):
-        path, year = fbq.popleft()
+    if fbq:
+        path, caption = fbq.popleft()
         if os.path.exists(path) and not path.lower().endswith(VIDEO_EXTS):
-            fd, cap = _get_media_metadata(path, media_log)
-            label = f"On this day, {year}" + (f" — {cap}" if cap else "")
-            show_layout(screen, [path], config, "single", file_meta=(str(year), label))
+            show_layout(screen, [path], config, "single", file_meta=(None, caption))
             _set_now_showing(path)
             _mark_shown(state, [path], config, len(files))
             return
@@ -252,6 +260,14 @@ def main():
         # Start web control server if enabled
         if config.get("web_control_enabled", False):
             start_web_server(config, screens)
+
+        # Ensure each contact has their own upload subfolder in the family folder.
+        if config.get("family_folder_enabled", False):
+            try:
+                from modules.google_drive_sync import ensure_family_subfolders
+                ensure_family_subfolders(config)
+            except Exception as e:
+                log_error(f"Family subfolder setup failed: {e}")
 
         # Load media files
         portrait_files, landscape_files = get_images_and_videos(config)
@@ -360,19 +376,30 @@ def main():
                         detect_motion(config, screens)
                     except Exception as e:
                         log_error(f"Night-mode motion check failed: {e}")
-                # Dedicate one HDMI to a large moon phase (if enabled); the
-                # rest show the analog clock + nightly quote.
-                for i, screen in enumerate(screens.values()):
-                    if config.get("moon_phase_enabled", True) and i == 0:
-                        show_moon_phase(screen, config)
-                    else:
-                        show_clock_with_quote(screen, config)
+
+                if config.get("night_screen_off", False):
+                    # True dark: actually power off the HDMI (no backlight glow).
+                    from modules.screen_power import screen_off
+                    screen_off()
+                else:
+                    # Dedicate one HDMI to a large moon phase (if enabled); the
+                    # rest show the analog clock + nightly quote.
+                    for i, screen in enumerate(screens.values()):
+                        if config.get("moon_phase_enabled", True) and i == 0:
+                            show_moon_phase(screen, config)
+                        else:
+                            show_clock_with_quote(screen, config)
                 time.sleep(10)
                 # Still check email during night mode
                 if current_ts - last_email_check > email_check_interval:
                     check_for_new_emails(config, screens)
                     last_email_check = current_ts
                 continue
+
+            # Daytime: if night mode blanked the HDMI, power it back on.
+            if config.get("night_screen_off", False):
+                from modules.screen_power import screen_on
+                screen_on()
 
             # ---- MOTION DETECTION ----
             if config.get("motion_triggered_slideshow", False):

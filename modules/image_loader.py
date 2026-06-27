@@ -198,6 +198,11 @@ def get_images_and_videos(config):
                 for path in media_path.iterdir():
                     if path.is_dir() and len(path.name) == 10 and path.name[4] == '-':
                         collect_files(path, orientation=None)
+
+            # Family/Friends folder — kept separate from personal folders, only
+            # mixed into the rotation when the source is enabled.
+            if config.get("family_folder_enabled", False):
+                collect_files("media/family", orientation=None)
         else:
             collect_files(media_folder, orientation=None)
 
@@ -216,6 +221,17 @@ def get_images_and_videos(config):
             landscape_files = quality.filter_sharp(landscape_files, config)
         except Exception as e:
             log_error(f"Blur filter failed: {e}")
+
+        # Dated greetings only show on their day, so keep them out of the
+        # everyday rotation.
+        try:
+            from modules.scheduled_media import scheduled_paths
+            sched = scheduled_paths()
+            if sched:
+                portrait_files = [f for f in portrait_files if f not in sched]
+                landscape_files = [f for f in landscape_files if f not in sched]
+        except Exception:
+            pass
 
         # Persist orientation cache to disk so next startup is fast
         _save_orientation_cache()
