@@ -11,6 +11,7 @@ token.json
 display_config.json
 special_days.json
 approved_senders.json
+contacts.json
 
 # Runtime state & logs
 error_log.json

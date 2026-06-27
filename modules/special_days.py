@@ -69,6 +69,22 @@ def get_todays_special_days(config, today=None):
         # Match "MM-DD" exactly, or "YYYY-MM-DD" by its month/day suffix.
         if raw == mmdd or raw.endswith("-" + mmdd):
             matches.append(entry)
+
+    # Also celebrate family/friends whose birthday is today (from contacts.json),
+    # biasing the slideshow toward their photos via photo_keyword.
+    try:
+        from modules import contacts as _contacts
+        for c in _contacts.todays_birthday_contacts(today):
+            email = c.get("email", "")
+            matches.append({
+                "name": c.get("name") or _contacts.derive_name(email),
+                "type": "birthday",
+                "date": c.get("birthday"),
+                "photo_keyword": c.get("photo_keyword") or _contacts.derive_keyword(email),
+            })
+    except Exception as e:
+        log_error(f"Contact birthday lookup failed: {e}")
+
     return matches
 
 

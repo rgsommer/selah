@@ -7,10 +7,10 @@ from modules.logger import log_error
 
 
 def _load_contacts():
-    """Load the family/friends list (the approved-senders whitelist)."""
+    """Load the family/friends contacts (with optional birthdays)."""
     try:
-        from modules.email_handler import load_approved_senders
-        return [str(s) for s in load_approved_senders()]
+        from modules.contacts import load_contacts
+        return load_contacts()
     except Exception:
         return []
 
@@ -140,32 +140,29 @@ def _manage_drive_folders(screen, config):
 
 
 def _manage_contacts(screen, config):
-    """Sub-screen to manage family/friends emails and send invitations.
+    """Sub-screen to manage family/friends, their birthdays, and invitations.
 
-    A=Add email, D=Delete, N=Nudge (email everyone an invitation explaining how
-    to send photos and schedule birthday greetings), ESC=Back. The list is the
-    approved-senders whitelist, so adding someone here also lets them submit.
+    A=Add email (name + photo keyword auto-derived), B=Set birthday for the
+    selected person, D=Delete, N=Nudge (email everyone an invitation), ESC=Back.
+    On a person's birthday, Selah celebrates them and favours their photos.
     """
+    from modules.contacts import (
+        load_contacts, save_contacts, parse_birthday, derive_name, derive_keyword,
+    )
+
     screen_w, screen_h = screen.get_size()
     font_size = max(22, screen_w // 40)
     font = pygame.font.Font(None, font_size)
     title_font = pygame.font.Font(None, font_size + 10)
     small = pygame.font.Font(None, max(18, font_size - 6))
 
-    contacts = _load_contacts()
+    contacts = load_contacts()
     selected = 0
-    adding = False
+    input_mode = None  # None | "email" | "birthday"
     buf = ""
     message = ""
     msg_until = 0
     clock = pygame.time.Clock()
-
-    def save():
-        try:
-            from modules.email_handler import _save_approved_senders
-            _save_approved_senders(contacts)
-        except Exception as e:
-            log_error(f"Failed to save contacts: {e}")
 
     running = True
     while running:
@@ -173,23 +170,29 @@ def _manage_contacts(screen, config):
         title = title_font.render("Family & Friends", True, (100, 200, 255))
         screen.blit(title, (20, 10))
         instr = small.render(
-            "A=Add   D=Delete   N=Nudge (send invite)   ESC=Back",
+            "A=Add   B=Set Birthday   D=Delete   N=Nudge   ESC=Back",
             True, (150, 150, 150))
         screen.blit(instr, (20, 15 + title_font.get_linesize()))
 
         y = 60 + title_font.get_linesize()
-        if not contacts and not adding:
+        if not contacts and input_mode != "email":
             screen.blit(font.render("(none yet — press A to add an email)", True, (200, 200, 120)), (30, y))
-        for i, em in enumerate(contacts):
-            if i == selected and not adding:
+        for i, c in enumerate(contacts):
+            if i == selected and input_mode is None:
                 hl = pygame.Surface((screen_w - 20, font_size + 8), pygame.SRCALPHA)
                 hl.fill((60, 60, 120, 150))
                 screen.blit(hl, (10, y - 2))
-            screen.blit(font.render(f"{i + 1}.  {em}", True, (255, 255, 255)), (30, y))
+            bday = c.get("birthday") or "—"
+            line = f"{i + 1}.  {c.get('email', '')}     birthday: {bday}"
+            screen.blit(font.render(line, True, (255, 255, 255)), (30, y))
             y += font_size + 10
 
-        if adding:
+        if input_mode == "email":
             screen.blit(font.render("Add email: " + buf + "_", True, (255, 255, 100)), (30, y + 14))
+        elif input_mode == "birthday":
+            who = contacts[selected].get("email", "") if contacts else ""
+            screen.blit(font.render(f"Birthday for {who}  (e.g. Sept 4): " + buf + "_",
+                                    True, (255, 255, 100)), (30, y + 14))
 
         if message and time.time() < msg_until:
             screen.blit(font.render(message, True, (120, 255, 160)), (30, screen_h - font_size - 16))
@@ -202,50 +205,74 @@ def _manage_contacts(screen, config):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.KEYDOWN:
-                if adding:
-                    if event.key == pygame.K_RETURN:
-                        em = buf.strip()
-                        if em and "@" in em and em not in contacts:
-                            contacts.append(em)
-                            selected = len(contacts) - 1
-                            save()
-                        adding, buf = False, ""
-                    elif event.key == pygame.K_ESCAPE:
-                        adding, buf = False, ""
-                    elif event.key == pygame.K_BACKSPACE:
-                        buf = buf[:-1]
-                    elif event.unicode and event.unicode.isprintable():
-                        buf += event.unicode
-                else:
-                    if event.key == pygame.K_ESCAPE:
-                        running = False
-                    elif event.key == pygame.K_a:
-                        adding, buf = True, ""
-                    elif event.key == pygame.K_d and contacts:
-                        contacts.pop(selected)
-                        selected = max(0, min(selected, len(contacts) - 1))
-                        save()
-                    elif event.key == pygame.K_n and contacts:
-                        # Show a sending indicator, then send synchronously.
-                        screen.blit(font.render("Sending invitations...", True, (255, 255, 100)),
-                                    (30, screen_h - font_size - 16))
-                        try:
-                            pygame.display.flip()
-                        except Exception:
-                            pass
-                        try:
-                            from modules.email_handler import send_invitations
-                            n = send_invitations(config, recipients=contacts)
-                            message = f"Invitation sent to {n} contact(s)."
-                        except Exception as e:
-                            log_error(f"Nudge failed: {e}")
-                            message = "Nudge failed — check email settings."
-                        msg_until = time.time() + 4
-                    elif event.key == pygame.K_DOWN:
-                        selected = min(selected + 1, max(0, len(contacts) - 1))
-                    elif event.key == pygame.K_UP:
-                        selected = max(selected - 1, 0)
+            elif event.type != pygame.KEYDOWN:
+                continue
+
+            if input_mode == "email":
+                if event.key == pygame.K_RETURN:
+                    em = buf.strip()
+                    if em and "@" in em and not any(c.get("email") == em for c in contacts):
+                        contacts.append({
+                            "email": em, "name": derive_name(em),
+                            "birthday": "", "photo_keyword": derive_keyword(em),
+                        })
+                        selected = len(contacts) - 1
+                        save_contacts(contacts)
+                    input_mode, buf = None, ""
+                elif event.key == pygame.K_ESCAPE:
+                    input_mode, buf = None, ""
+                elif event.key == pygame.K_BACKSPACE:
+                    buf = buf[:-1]
+                elif event.unicode and event.unicode.isprintable():
+                    buf += event.unicode
+
+            elif input_mode == "birthday":
+                if event.key == pygame.K_RETURN:
+                    if contacts:
+                        bd = parse_birthday(buf)
+                        contacts[selected]["birthday"] = bd
+                        save_contacts(contacts)
+                        message = f"Birthday set to {bd}" if bd else "Couldn't read that date"
+                        msg_until = time.time() + 3
+                    input_mode, buf = None, ""
+                elif event.key == pygame.K_ESCAPE:
+                    input_mode, buf = None, ""
+                elif event.key == pygame.K_BACKSPACE:
+                    buf = buf[:-1]
+                elif event.unicode and event.unicode.isprintable():
+                    buf += event.unicode
+
+            else:  # list navigation
+                if event.key == pygame.K_ESCAPE:
+                    running = False
+                elif event.key == pygame.K_a:
+                    input_mode, buf = "email", ""
+                elif event.key == pygame.K_b and contacts:
+                    input_mode = "birthday"
+                    buf = str(contacts[selected].get("birthday", ""))
+                elif event.key == pygame.K_d and contacts:
+                    contacts.pop(selected)
+                    selected = max(0, min(selected, len(contacts) - 1))
+                    save_contacts(contacts)
+                elif event.key == pygame.K_n and contacts:
+                    screen.blit(font.render("Sending invitations...", True, (255, 255, 100)),
+                                (30, screen_h - font_size - 16))
+                    try:
+                        pygame.display.flip()
+                    except Exception:
+                        pass
+                    try:
+                        from modules.email_handler import send_invitations
+                        n = send_invitations(config, recipients=[c.get("email") for c in contacts])
+                        message = f"Invitation sent to {n} contact(s)."
+                    except Exception as e:
+                        log_error(f"Nudge failed: {e}")
+                        message = "Nudge failed — check email settings."
+                    msg_until = time.time() + 4
+                elif event.key == pygame.K_DOWN:
+                    selected = min(selected + 1, max(0, len(contacts) - 1))
+                elif event.key == pygame.K_UP:
+                    selected = max(selected - 1, 0)
 
         clock.tick(30)
 
@@ -295,7 +322,7 @@ def show_config_gui(screen, config):
             ("special_days_time", "  Special Days Time (HH:MM)", "str"),
 
             # --- People ---
-            ("__contacts__", "Family & Friends (invite)", "contacts"),
+            ("__contacts__", "Family & Friends (birthdays + invite)", "contacts"),
 
             # --- Photo sources ---
             ("cloud_backup_enabled", "Google Drive Sync", "bool"),
