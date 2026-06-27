@@ -1,0 +1,80 @@
+import pygame
+import os
+from pathlib import Path
+from modules.email_handler import log_error
+
+def init_displays():
+    try:
+        pygame.init()
+        screens = {}
+        display_info = pygame.display.Info()
+        if display_info.current_w > display_info.current_h:
+            screens["landscape"] = pygame.display.set_mode((display_info.current_w, display_info.current_h), pygame.FULLSCREEN)
+        else:
+            screens["portrait"] = pygame.display.set_mode((display_info.current_w, display_info.current_h), pygame.FULLSCREEN)
+        return screens
+    except Exception as e:
+        log_error(f"Display initialization failed: {e}", critical=True)
+        return {}
+
+def show_image(screen, image_path, config, file_date=None, caption=None):
+    try:
+        image = pygame.image.load(image_path)
+        image = pygame.transform.scale(image, screen.get_size())
+        screen.blit(image, (0, 0))
+        
+        font = pygame.font.Font(None, 36)
+        y_offset = screen.get_height() - 100
+        
+        if config.get("show_file_name", False):
+            file_name = os.path.basename(image_path)
+            text = font.render(f"File: {file_name}", True, (255, 255, 255), (0, 0, 0))
+            screen.blit(text, (10, y_offset))
+            y_offset -= 40
+        
+        if config.get("show_file_date", False) and file_date:
+            date_str = file_date if isinstance(file_date, str) else file_date.isoformat()
+            text = font.render(f"Date: {date_str}", True, (255, 255, 255), (0, 0, 0))
+            screen.blit(text, (10, y_offset))
+            y_offset -= 40
+        
+        if config.get("show_caption", False) and caption:
+            text = font.render(f"Caption: {caption}", True, (255, 255, 255), (0, 0, 0))
+            screen.blit(text, (10, y_offset))
+        
+        pygame.display.flip()
+    except Exception as e:
+        log_error(f"Image display failed: {e}", critical=True, config=config)
+
+def show_video(screen, video_path, config, file_date=None, caption=None):
+    try:
+        player = vlc.MediaPlayer(video_path)
+        player.set_hwnd(screen.get_wm_info()["window"])
+        player.play()
+        
+        font = pygame.font.Font(None, 36)
+        y_offset = screen.get_height() - 100
+        
+        if config.get("show_file_name", False):
+            file_name = os.path.basename(video_path)
+            text = font.render(f"File: {file_name}", True, (255, 255, 255), (0, 0, 0))
+            screen.blit(text, (10, y_offset))
+            y_offset -= 40
+        
+        if config.get("show_file_date", False) and file_date:
+            date_str = file_date if isinstance(file_date, str) else file_date.isoformat()
+            text = font.render(f"Date: {date_str}", True, (255, 255, 255), (0, 0, 0))
+            screen.blit(text, (10, y_offset))
+            y_offset -= 40
+        
+        if config.get("show_caption", False) and caption:
+            text = font.render(f"Caption: {caption}", True, (255, 255, 255), (0, 0, 0))
+            screen.blit(text, (10, y_offset))
+        
+        pygame.display.flip()
+        
+        while player.get_state() not in [vlc.State.Ended, vlc.State.Error]:
+            time.sleep(1)
+        player.stop()
+    except Exception as e:
+        log_error(f"Video display failed: {e}", critical=True, config=config)

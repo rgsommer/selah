@@ -1,0 +1,7 @@
+[
+  {"name": "Valentine's Day", "start_date": "02-10", "end_date": "02-14", "background_color": [180, 20, 60]},
+  {"name": "Easter", "start_date": "03-25", "end_date": "04-20", "background_color": [200, 180, 255]},
+  {"name": "Canada Day", "start_date": "06-28", "end_date": "07-02", "background_color": [200, 0, 0]},
+  {"name": "Thanksgiving", "start_date": "10-05", "end_date": "10-15", "background_color": [200, 120, 0]},
+  {"name": "Christmas", "start_date": "12-01", "end_date": "12-31", "background_color": [200, 0, 0]}
+]

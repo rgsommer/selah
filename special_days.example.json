@@ -1,0 +1,6 @@
+[
+  {"name": "Mom", "date": "05-10", "type": "birthday", "photo_keyword": "mom"},
+  {"name": "Dad", "date": "1958-09-02", "type": "birthday"},
+  {"name": "Mom & Dad", "date": "1985-06-22", "type": "anniversary"},
+  {"name": "Canada Day", "date": "07-01", "type": "holiday", "message": "Happy Canada Day! 🇨🇦"}
+]

@@ -1,0 +1,159 @@
+import datetime
+import time
+from random import shuffle
+import pygame
+import vlc
+from modules.config_utils import load_config, save_config
+from modules.display_handler import init_displays, show_image, show_video
+from modules.image_loader import get_images_and_videos
+from modules.event_handler import handle_events
+from modules.time_manager import is_display_off
+from modules.email_handler import check_for_new_emails, log_error
+from modules.toast import show_toast_if_needed
+from modules.verse_handler import show_verse_if_scheduled
+from modules.calendar_display import show_calendar_if_scheduled
+from modules.motion_detector import detect_motion
+from modules.face_recognition_handler import prioritize_images
+from modules.quote_loader import show_clock_with_quote
+from modules.selah_config_gui import show_config_gui
+from modules.sender_manager import show_sender_manager
+from modules.leaderboard import show_leaderboard
+from modules.weather_display import show_weather_if_scheduled
+from modules.voice_control import process_voice_command
+from modules.theme_manager import apply_theme
+from modules.quiz_mode import start_quiz_mode
+from modules.web_control import start_web_server
+from modules.google_drive_sync import sync_drive, pull_from_drive
+import json
+
+def main():
+    config = load_config("display_config.json")
+    screens = init_displays()
+    if not screens:
+        log_error("No displays initialized. Exiting.", critical=True, config=config)
+        return
+    try:
+        if config.get("web_control_enabled", False):
+            start_web_server(config, screens)
+        portrait_files, landscape_files = get_images_and_videos(config)
+        if config.get("enable_face_recognition", False):
+            portrait_files = prioritize_images(portrait_files, config)
+            landscape_files = prioritize_images(landscape_files, config)
+        shuffle(portrait_files)
+        shuffle(landscape_files)
+        if not portrait_files and not landscape_files:
+            log_error("No media found. Exiting.", critical=True, config=config)
+            for screen in screens.values():
+                screen.quit()
+            return
+        state = {
+            "portrait": {"index": 0, "paused_until": 0},
+            "landscape": {"index": 0, "paused_until": 0},
+            "slideshow_active": False,
+            "last_motion": time.time(),
+            "new_media": None,
+            "last_drive_sync": 0,
+        }
+        rotate_interval = config.get("rotate_interval", 10)
+        motion_timeout = config.get("motion_timeout", 300)
+        
+        try:
+            with open("media_log.json", "r") as f:
+                media_log = json.load(f)
+        except:
+            media_log = []
+
+        while True:
+            now = datetime.datetime.now()
+            current_time = now.time()
+            apply_theme(screens, config)
+            state = handle_events(screens, config, portrait_files, landscape_files, state)
+            for event in pygame.event.get():
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_F1:
+                        show_config_gui(screens.get("landscape") or screens.get("portrait"), config)
+                        save_config(config, "display_config.json")
+                    elif event.key == pygame.K_F2:
+                        show_sender_manager(screens.get("landscape") or screens.get("portrait"), config)
+                    elif event.key == pygame.K_F3:
+                        show_leaderboard(screens, config)
+                    elif event.key == pygame.K_F4:
+                        start_quiz_mode(screens, config, portrait_files + landscape_files)
+            if is_display_off(current_time, config):
+                for screen in screens.values():
+                    show_clock_with_quote(screen, config)
+                time.sleep(10)
+                continue
+            if config.get("motion_triggered_slideshow", False):
+                if detect_motion(config, screens):
+                    state["slideshow_active"] = True
+                    state["last_motion"] = time.time()
+                elif time.time() - state["last_motion"] > motion_timeout:
+                    state["slideshow_active"] = False
+                    for screen in screens.values():
+                        screen.fill((0, 0, 0))
+                        pygame.display.flip()
+                    time.sleep(10)
+                    continue
+            check_for_new_emails(config, screens)
+            # Periodic Google Drive sync (pull new photos + push backups)
+            drive_sync_interval = config.get("drive_sync_interval", 300)
+            if config.get("cloud_backup_enabled", False) and time.time() - state["last_drive_sync"] > drive_sync_interval:
+                try:
+                    downloaded, uploaded = sync_drive(config, screens)
+                    if downloaded:
+                        show_toast_if_needed(screens, config, f"Synced {downloaded} new photo(s) from Google Drive")
+                    state["last_drive_sync"] = time.time()
+                except Exception as e:
+                    log_error(f"Drive sync failed: {e}", config=config)
+                    state["last_drive_sync"] = time.time()
+            portrait_files, landscape_files = get_images_and_videos(config)
+            if config.get("enable_face_recognition", False):
+                portrait_files = prioritize_images(portrait_files, config)
+                landscape_files = prioritize_images(landscape_files, config)
+            shuffle(portrait_files)
+            shuffle(landscape_files)
+            if state["new_media"] and config.get("immediate_display", False):
+                for screen_type, screen in screens.items():
+                    if screen_type in state["new_media"]:
+                        file_path = state["new_media"][screen_type]
+                        media_entry = next((entry for entry in media_log if entry["file_path"] == file_path), {})
+                        file_date = media_entry.get("date")
+                        caption = media_entry.get("caption")
+                        if file_path.lower().endswith(('.mp4', '.avi', '.mov')):
+                            show_video(screen, file_path, config, file_date, caption)
+                        else:
+                            show_image(screen, file_path, config, file_date, caption)
+                        state["new_media"] = None
+                        state[screen_type]["paused_until"] = time.time() + config.get("manual_navigation_pause", 60)
+                continue
+            show_toast_if_needed(screens, config)
+            if config.get("verse_display_enabled", False):
+                show_verse_if_scheduled(screens, config)
+            if config.get("calendar_display_enabled", False):
+                show_calendar_if_scheduled(screens, config)
+            if config.get("weather_enabled", False):
+                show_weather_if_scheduled(screens, config)
+            if config.get("voice_control_enabled", False):
+                process_voice_command(screens, config, state, portrait_files, landscape_files)
+            if state["slideshow_active"] or not config.get("motion_triggered_slideshow", False):
+                for screen_type, screen in screens.items():
+                    if time.time() < state[screen_type]["paused_until"]:
+                        continue
+                    files = landscape_files if screen_type == "landscape" else portrait_files
+                    if files:
+                        file_path = files[state[screen_type]["index"]]
+                        media_entry = next((entry for entry in media_log if entry["file_path"] == file_path), {})
+                        file_date = media_entry.get("date")
+                        caption = media_entry.get("caption")
+                        if file_path.lower().endswith(('.mp4', '.avi', '.mov')):
+                            show_video(screen, file_path, config, file_date, caption)
+                        else:
+                            show_image(screen, file_path, config, file_date, caption)
+                        state[screen_type]["index"] = (state[screen_type]["index"] + 1) % len(files)
+            time.sleep(rotate_interval)
+    except Exception as e:
+        log_error(f"Main loop failed: {e}", critical=True, config=config)
+
+if __name__ == "__main__":
+    main()

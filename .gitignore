@@ -1,0 +1,33 @@
+# Selah — keep secrets and machine-local state out of version control
+
+# Secrets / credentials
+secrets.local.json
+credentials.json
+token.json
+
+# Device-local config (edited on the Pi via F1 / by hand) — ships as *.example.
+# Keeping these untracked means `git pull`/reset on the Pi never clobbers
+# on-device settings, birthdays, or the approved-sender list.
+display_config.json
+special_days.json
+approved_senders.json
+
+# Runtime state & logs
+error_log.json
+media_log.json
+leaderboard.json
+quiz_scores.json
+weather_cache.json
+calendar_cache.json
+orientation_cache.json
+drive_sync_state.json
+invite_log.json
+__pycache__/
+*.pyc
+
+# Media & recordings
+media/
+recordings/
+
+# macOS
+.DS_Store

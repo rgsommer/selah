@@ -1,0 +1,12 @@
+[Unit]
+Description=Selah auto-update (git pull + restart if changed)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+# Adjust SELAH_DIR if you cloned somewhere other than ~/selah_display.
+Environment=SELAH_DIR=/home/pi/selah_display
+Environment=SELAH_BRANCH=main
+ExecStart=/home/pi/selah_display/deploy/selah-update.sh
