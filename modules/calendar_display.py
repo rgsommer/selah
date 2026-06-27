@@ -87,7 +87,7 @@ def _try_google_calendar(config):
         end = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).isoformat() + "Z"
 
         events_result = service.events().list(
-            calendarId="primary",
+            calendarId=config.get("google_calendar_id", "primary"),
             timeMin=now_str,
             timeMax=end,
             maxResults=20,

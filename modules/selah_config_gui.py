@@ -324,6 +324,7 @@ def show_config_gui(screen, config):
             ("moon_phase_enabled", "Night Moon Phase", "bool"),
             ("night_screen_off", "Night: Blank HDMI (true dark)", "bool"),
             ("calendar_display_enabled", "Daily Agenda (calendar)", "bool"),
+            ("google_calendar_id", "  Calendar ID", "str"),
             ("calendar_start_time", "  Agenda Start (HH:MM)", "str"),
             ("calendar_duration_minutes", "  Agenda Duration (min, 0=all day)", "int"),
             ("weather_enabled", "Weather Display", "bool"),

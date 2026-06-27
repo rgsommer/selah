@@ -37,6 +37,7 @@
   "timezone": "America/Toronto",
   "calendar_start_time": "06:00",
   "calendar_duration_minutes": 0,
+  "google_calendar_id": "primary",
   "moon_phase_enabled": true,
   "night_screen_off": false,
   "enable_face_recognition": true,

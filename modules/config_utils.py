@@ -46,6 +46,7 @@ DEFAULT_CONFIG = {
     "timezone": "America/Toronto",
     "calendar_start_time": "06:00",
     "calendar_duration_minutes": 0,
+    "google_calendar_id": "primary",
     "moon_phase_enabled": True,
     "night_screen_off": False,
     "enable_face_recognition": False,
