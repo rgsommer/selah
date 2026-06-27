@@ -83,14 +83,16 @@ def _try_google_calendar(config):
             return None
 
         service = build("calendar", "v3", credentials=creds)
-        now_str = datetime.datetime.utcnow().isoformat() + "Z"
-        end = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).isoformat() + "Z"
+        # Today + tomorrow only, in the display's local timezone.
+        start = datetime.datetime.now().astimezone().replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        end = start + datetime.timedelta(days=2)
 
         events_result = service.events().list(
             calendarId=config.get("google_calendar_id", "primary"),
-            timeMin=now_str,
-            timeMax=end,
-            maxResults=20,
+            timeMin=start.isoformat(),
+            timeMax=end.isoformat(),
+            maxResults=25,
             singleEvents=True,
             orderBy="startTime"
         ).execute()
@@ -114,18 +116,19 @@ def _try_local_calendar():
     try:
         with open("calendar_events.json", "r") as f:
             events = json.load(f)
-        # Filter to upcoming events
+        # Keep only today and tomorrow.
         today = datetime.date.today()
+        tomorrow = today + datetime.timedelta(days=1)
         upcoming = []
         for event in events:
             try:
                 event_date = datetime.datetime.fromisoformat(
-                    event.get("start", event.get("date", ""))
+                    event.get("start", event.get("date", ""))[:10]
                 ).date()
-                if event_date >= today:
+                if today <= event_date <= tomorrow:
                     upcoming.append(event)
             except Exception:
-                upcoming.append(event)  # Include if we can't parse date
+                upcoming.append(event)  # include if we can't parse the date
         return upcoming
     except FileNotFoundError:
         return []
@@ -134,60 +137,80 @@ def _try_local_calendar():
         return []
 
 
+def _event_when(start_str):
+    """Return (date, time_label) for an event start; 'All day' for date-only."""
+    try:
+        s = str(start_str)
+        if "T" in s:
+            dt = datetime.datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone()
+            try:
+                return dt.date(), dt.strftime("%-I:%M %p")
+            except Exception:
+                return dt.date(), dt.strftime("%H:%M")
+        return datetime.date.fromisoformat(s[:10]), "All day"
+    except Exception:
+        return None, ""
+
+
 def _render_scrolling_calendar(screen, events, config):
-    """Render calendar events as a scrolling feed overlay."""
+    """Render a Today / Tomorrow agenda as a right-side panel."""
     try:
         screen_w, screen_h = screen.get_size()
-        font_size = max(24, screen_w // 35)
+        today = datetime.date.today()
+        tomorrow = today + datetime.timedelta(days=1)
+
+        grouped = {today: [], tomorrow: []}
+        for e in events:
+            d, tl = _event_when(e.get("start", ""))
+            if d in grouped:
+                grouped[d].append((tl, e.get("summary", "Untitled")))
+
+        font_size = max(24, screen_w // 38)
+        head_font = pygame.font.Font(None, font_size + 6)
         font = pygame.font.Font(None, font_size)
-        small_font = pygame.font.Font(None, max(20, font_size - 6))
+        small = pygame.font.Font(None, max(20, font_size - 6))
 
-        # Build event text lines
-        lines = []
-        for event in events[:10]:  # Max 10 events
-            summary = event.get("summary", "Untitled")
-            start = event.get("start", "")
-            # Format date nicely
-            try:
-                dt = datetime.datetime.fromisoformat(start.replace("Z", "+00:00"))
-                date_str = dt.strftime("%a %b %d, %I:%M %p")
-            except Exception:
-                date_str = start
-            lines.append((summary, date_str))
+        # Flatten into drawable lines.
+        lines = []  # (kind, payload)
+        for title, d in (("Today", today), ("Tomorrow", tomorrow)):
+            lines.append(("header", title))
+            evs = grouped.get(d, [])
+            if not evs:
+                lines.append(("empty", "— nothing scheduled"))
+            else:
+                for tl, summary in evs:
+                    lines.append(("event", (tl, summary)))
 
-        if not lines:
-            return
+        line_h = font.get_linesize() + 8
+        panel_w = min(screen_w // 3, 460)
+        panel_h = min(len(lines) * line_h + 60, screen_h - 40)
+        x = screen_w - panel_w - 16
+        y = (screen_h - panel_h) // 2
 
-        line_height = font.get_linesize() + small_font.get_linesize() + 10
-        total_height = min(len(lines) * line_height + 40, screen_h // 2)
+        bg = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        bg.fill((0, 0, 40, 190))
+        screen.blit(bg, (x, y))
 
-        # Semi-transparent sidebar on the right
-        sidebar_w = min(screen_w // 3, 400)
-        bg_surface = pygame.Surface((sidebar_w, total_height), pygame.SRCALPHA)
-        bg_surface.fill((0, 0, 50, 180))
-        x_pos = screen_w - sidebar_w - 10
-        y_pos = (screen_h - total_height) // 2
-        screen.blit(bg_surface, (x_pos, y_pos))
-
-        # Header
-        header = font.render("Upcoming Events", True, (100, 200, 255))
-        screen.blit(header, (x_pos + 10, y_pos + 5))
-
-        # Events
-        y = y_pos + font.get_linesize() + 15
-        for summary, date_str in lines:
-            if y + line_height > y_pos + total_height:
+        cy = y + 14
+        time_col = max(96, panel_w // 4)
+        for kind, payload in lines:
+            if cy + line_h > y + panel_h - 8:
                 break
-            # Truncate if too long
-            max_chars = sidebar_w // (font_size // 2)
-            if len(summary) > max_chars:
-                summary = summary[:max_chars - 3] + "..."
-
-            title_surf = font.render(summary, True, (255, 255, 255))
-            date_surf = small_font.render(date_str, True, (180, 180, 180))
-            screen.blit(title_surf, (x_pos + 10, y))
-            screen.blit(date_surf, (x_pos + 10, y + font.get_linesize()))
-            y += line_height
+            if kind == "header":
+                surf = head_font.render(payload, True, (120, 200, 255))
+                screen.blit(surf, (x + 14, cy))
+                cy += head_font.get_linesize() + 4
+            elif kind == "empty":
+                screen.blit(small.render(payload, True, (150, 150, 160)), (x + 24, cy))
+                cy += line_h
+            else:
+                tl, summary = payload
+                max_chars = max(8, (panel_w - time_col) // max(1, font_size // 2))
+                if len(summary) > max_chars:
+                    summary = summary[:max_chars - 1] + "…"
+                screen.blit(small.render(tl, True, (210, 210, 140)), (x + 24, cy + 2))
+                screen.blit(font.render(summary, True, (255, 255, 255)), (x + 24 + time_col, cy))
+                cy += line_h
 
         try:
             pygame.display.flip()
