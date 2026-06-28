@@ -375,13 +375,8 @@ def _handle_unapproved_sender(sender, msg, config, screens):
     attachment_info = f"{len(pending_files)} file(s)" if pending_files else "no attachments"
     _send_approval_request(sender_name, sender_email, subject, attachment_info, config)
 
-    # Toast notification
-    try:
-        from modules.toast import queue_toast
-        queue_toast(f"Approval needed: {sender_name}")
-    except Exception:
-        pass
-
+    # No on-screen takeover — a subtle corner badge (drawn from main.py) shows
+    # the pending count, and F5 approves them all.
     print(f"[Selah] Pending approval for {sender_email} ({attachment_info})")
 
 
@@ -548,6 +543,48 @@ def _save_pending(pending):
             json.dump(pending, f, indent=2)
     except Exception as e:
         log_error(f"Failed to save pending approvals: {e}")
+
+
+def count_pending():
+    """How many senders are awaiting approval."""
+    return len(_load_pending())
+
+
+def approve_all_pending(config):
+    """Approve every pending sender at once: whitelist them, move their photos
+    into the display folder, and clear the queue. Returns the count approved.
+    """
+    pending = _load_pending()
+    if not pending:
+        return 0
+    from pathlib import Path
+    senders = load_approved_senders()
+    display_dir = Path(config.get("display_dir", "media/display"))
+    display_dir.mkdir(parents=True, exist_ok=True)
+
+    moved = 0
+    for entry in pending:
+        em = (entry.get("sender_email") or "").strip()
+        if em and em not in senders:
+            senders.append(em)
+        for fp in entry.get("files", []):
+            try:
+                p = Path(fp)
+                if p.exists():
+                    dest = display_dir / p.name
+                    n = 1
+                    while dest.exists():
+                        dest = display_dir / f"{p.stem}_{n}{p.suffix}"
+                        n += 1
+                    p.rename(dest)
+                    moved += 1
+            except Exception as e:
+                log_error(f"Failed to move pending file {fp}: {e}")
+
+    _save_approved_senders(senders)
+    _save_pending([])
+    print(f"[Selah] Approved all pending: {len(pending)} sender(s), {moved} file(s)")
+    return len(pending)
 
 
 def send_annual_invites(config):

@@ -79,6 +79,7 @@ DEFAULT_CONFIG = {
     "web_control_enabled": False,
     "web_control_password": "selah123",
     "theme_enabled": False,
+    "pending_badge_enabled": True,
     "notification_sound_enabled": True,
     "notification_sound_path": "/usr/share/sounds/freedesktop/stereo/message-new-instant.oga",
     "notification_duration": 15,

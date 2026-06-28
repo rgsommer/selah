@@ -49,6 +49,7 @@ from modules.upload_qr import show_upload_qr_if_scheduled
 from modules.now_showing import set_current as _set_now_showing
 from modules.favorites import prioritize_favorites
 from modules.coming_up import show_coming_up_if_scheduled
+from modules.pending_badge import show_pending_badge
 
 
 def _load_media_log():
@@ -373,6 +374,16 @@ def main():
                         show_leaderboard(screens, config)
                     elif event.key == pygame.K_F4:
                         start_quiz_mode(screens, config, portrait_files + landscape_files)
+                    elif event.key == pygame.K_F5:
+                        # Approve every pending sender at once.
+                        try:
+                            from modules.email_handler import approve_all_pending
+                            n = approve_all_pending(config)
+                            if n:
+                                show_toast_if_needed(screens, config,
+                                                     f"Approved {n} pending sender(s)")
+                        except Exception as e:
+                            log_error(f"Approve-all failed: {e}")
 
             # ---- NIGHT MODE ----
             if is_display_off(current_time, config):
@@ -569,6 +580,9 @@ def main():
             # ---- "COMING UP" birthday heads-up (periodic) ----
             if config.get("coming_up_enabled", False):
                 show_coming_up_if_scheduled(screens, config)
+
+            # ---- PENDING-APPROVAL badge (subtle corner chip; F5 approves all) ----
+            show_pending_badge(screens, config)
 
             time.sleep(rotate_interval)
 
