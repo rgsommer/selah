@@ -188,6 +188,7 @@ def _fetch_openweathermap(api_key, location):
                 "temp_max": round(data["main"].get("temp_max", data["main"]["temp"])),
                 "feels_like": round(data["main"]["feels_like"]),
                 "description": data["weather"][0]["description"].title(),
+                "main": data["weather"][0]["main"],
                 "humidity": data["main"]["humidity"],
                 "wind_speed": round(data["wind"]["speed"] * 3.6, 1),
                 "city": data.get("name", location),
@@ -320,25 +321,73 @@ def _short(text, n=14):
 
 # --- Persistent corner pill (current conditions) ---------------------------
 def show_weather_pill(screens, config):
-    """A small always-on pill in a corner: current temp + condition."""
+    """A small always-on pill in a corner: current temp + icon + today's high."""
     if not config.get("weather_pill_enabled", False):
         return
     weather = _get_weather(config)
     if not weather:
         return
-    text = f"{weather['temp']}°C  {weather.get('description', '')}".strip()
     pos = config.get("weather_pill_position", "top-right")
     for screen in screens.values():
-        _render_pill(screen, text, pos)
+        _render_pill(screen, weather, pos)
 
 
-def _render_pill(screen, text, pos):
+def _cloud(surf, cx, cy, r, color):
+    pygame.draw.circle(surf, color, (cx - r // 2, cy), r // 2)
+    pygame.draw.circle(surf, color, (cx + r // 2, cy), r // 2)
+    pygame.draw.circle(surf, color, (cx, cy - r // 4), int(r * 0.6))
+    pygame.draw.rect(surf, color, (cx - r, cy, 2 * r, r // 2 + 1))
+
+
+def _draw_weather_icon(surf, cx, cy, r, main):
+    """Draw a small sun/cloud/rain/snow/storm glyph (default font can't do emoji)."""
+    import math
+    m = (main or "").lower()
+    try:
+        if "clear" in m:
+            pygame.draw.circle(surf, (255, 210, 80), (cx, cy), r)
+            for ang in range(0, 360, 45):
+                dx, dy = math.cos(math.radians(ang)), math.sin(math.radians(ang))
+                pygame.draw.line(surf, (255, 210, 80),
+                                 (cx + dx * (r + 2), cy + dy * (r + 2)),
+                                 (cx + dx * (r + r // 2), cy + dy * (r + r // 2)), 2)
+        elif "rain" in m or "drizzle" in m:
+            _cloud(surf, cx, cy - r // 3, r, (185, 190, 200))
+            for i in (-1, 0, 1):
+                pygame.draw.line(surf, (90, 150, 230),
+                                 (cx + i * r // 2, cy + r // 2), (cx + i * r // 2 - 2, cy + r), 2)
+        elif "snow" in m:
+            _cloud(surf, cx, cy - r // 3, r, (215, 220, 230))
+            for i in (-1, 0, 1):
+                pygame.draw.circle(surf, (255, 255, 255), (cx + i * r // 2, cy + r // 2 + 3), 2)
+        elif "thunder" in m:
+            _cloud(surf, cx, cy - r // 3, r, (160, 160, 175))
+            pygame.draw.polygon(surf, (255, 220, 60),
+                                [(cx, cy), (cx - r // 3, cy + r // 2), (cx, cy + r // 3), (cx + r // 4, cy + r)])
+        elif "cloud" in m:
+            _cloud(surf, cx, cy, r, (210, 212, 218))
+        else:  # mist / fog / haze
+            for i in range(3):
+                pygame.draw.line(surf, (200, 200, 205),
+                                 (cx - r, cy - r // 2 + i * (r // 2)), (cx + r, cy - r // 2 + i * (r // 2)), 2)
+    except Exception:
+        pass
+
+
+def _render_pill(screen, weather, pos):
     try:
         w, h = screen.get_size()
-        font = pygame.font.Font(None, max(20, w // 55))
-        surf = font.render(text, True, (255, 255, 255))
-        pad, margin = 8, 14
-        pw, ph = surf.get_width() + pad * 2, surf.get_height() + pad * 2
+        font = pygame.font.Font(None, max(22, w // 50))
+        temp_s = font.render(f"{weather['temp']}°", True, (255, 255, 255))
+        high_s = font.render(f"H {weather.get('temp_max', weather['temp'])}°", True, (210, 220, 235))
+
+        pad, gap = 9, 9
+        icon_r = max(7, font.get_height() // 3)
+        icon_w = icon_r * 3
+        pw = pad * 2 + temp_s.get_width() + gap + icon_w + gap + high_s.get_width()
+        ph = pad * 2 + max(temp_s.get_height(), icon_r * 2 + 4)
+
+        margin = 14
         if pos == "top-left":
             x, y = margin, margin
         elif pos == "bottom-left":
@@ -347,10 +396,18 @@ def _render_pill(screen, text, pos):
             x, y = w - pw - margin, h - ph - margin
         else:
             x, y = w - pw - margin, margin
+
         bg = pygame.Surface((pw, ph), pygame.SRCALPHA)
-        bg.fill((0, 0, 0, 165))
+        bg.fill((0, 0, 0, 170))
         screen.blit(bg, (x, y))
-        screen.blit(surf, (x + pad, y + pad))
+
+        cy = y + ph // 2
+        cx = x + pad
+        screen.blit(temp_s, (cx, cy - temp_s.get_height() // 2))
+        cx += temp_s.get_width() + gap + icon_w // 2
+        _draw_weather_icon(screen, cx, cy, icon_r, weather.get("main", ""))
+        cx += icon_w // 2 + gap
+        screen.blit(high_s, (cx, cy - high_s.get_height() // 2))
         try:
             pygame.display.flip()
         except Exception:
