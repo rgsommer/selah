@@ -73,6 +73,8 @@ DEFAULT_CONFIG = {
     "google_drive_backup_folder_id": "",
     "drive_push_enabled": False,
     "drive_upload_batch": 200,
+    "drive_downscale_enabled": True,
+    "drive_downscale_max_px": 2560,
     "family_folder_enabled": False,
     "family_folder_id": "",
     "family_folder_recurring": True,

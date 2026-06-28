@@ -21,6 +21,7 @@ import json
 import time
 import hashlib
 import datetime
+import threading
 from pathlib import Path
 
 try:
@@ -49,8 +50,35 @@ VIDEO_MIMES = {
     "video/quicktime": ".mov",
 }
 ALL_MEDIA_MIMES = {**IMAGE_MIMES, **VIDEO_MIMES}
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png")
 
 SYNC_STATE_FILE = "drive_sync_state.json"
+
+
+def _maybe_downscale(path, config):
+    """Shrink a just-downloaded image to a max long edge so 12MP+ originals
+    don't fill the disk. No-op for video, small images, or if disabled."""
+    if not config.get("drive_downscale_enabled", True):
+        return
+    p = str(path)
+    if not p.lower().endswith(_IMAGE_EXTS):
+        return
+    max_edge = int(config.get("drive_downscale_max_px", 2560))
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(p) as im:
+            im = ImageOps.exif_transpose(im)  # bake rotation in before stripping EXIF
+            w, h = im.size
+            if max(w, h) <= max_edge:
+                return  # already small enough
+            scale = max_edge / float(max(w, h))
+            im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+            if p.lower().endswith(".png"):
+                im.save(p, optimize=True)
+            else:
+                im.convert("RGB").save(p, "JPEG", quality=85, optimize=True)
+    except Exception as e:
+        log_error(f"Downscale failed for {p}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +285,7 @@ def _pull_one_folder(service, folder_id, config, downloaded, new_files):
                     "source_folder": folder_id,
                     "downloaded_at": datetime.datetime.now().isoformat(),
                 }
+                _maybe_downscale(dest_path, config)
                 new_files.append(str(dest_path))
                 print(f"[Drive Sync] Downloaded: {file_name} -> {dest_path}")
             except Exception as e:
@@ -356,6 +385,7 @@ def _pull_family_recursive(service, folder_id, subpath, config, downloaded, new_
                     done = False
                     while not done:
                         _, done = dl.next_chunk()
+                _maybe_downscale(dest_path, config)
                 downloaded[file_id] = {
                     "local_path": str(dest_path), "name": name,
                     "downloaded_at": datetime.datetime.now().isoformat(),
@@ -532,6 +562,50 @@ def sync_drive(config, screens=None):
     # 3rd value = additions to the shared Family/Friends folder (the "someone
     # uploaded" signal), kept separate from the personal-folder bulk sync.
     return len(new_files), uploaded_count, len(family_new)
+
+
+# ---------------------------------------------------------------------------
+# Background sync — keeps the slideshow running while photos download.
+# ---------------------------------------------------------------------------
+_sync_thread = None
+_sync_lock = threading.Lock()
+_sync_result = None      # (downloaded, uploaded, family_added), consumed once
+
+
+def is_syncing():
+    """True while a background sync is in progress."""
+    return _sync_thread is not None and _sync_thread.is_alive()
+
+
+def start_background_sync(config):
+    """Kick off sync_drive on a daemon thread. Returns False if one is already
+    running (so the caller doesn't pile up overlapping syncs)."""
+    global _sync_thread
+    if is_syncing():
+        return False
+
+    def _run():
+        global _sync_result
+        try:
+            res = sync_drive(config)
+        except Exception as e:
+            log_error(f"Background drive sync failed: {e}", config=config)
+            res = (0, 0, 0)
+        with _sync_lock:
+            _sync_result = res
+
+    _sync_thread = threading.Thread(target=_run, name="drive-sync", daemon=True)
+    _sync_thread.start()
+    return True
+
+
+def take_sync_result():
+    """Return and clear the last finished sync's (downloaded, uploaded,
+    family_added) tuple, or None if nothing has finished since last call."""
+    global _sync_result
+    with _sync_lock:
+        res, _sync_result = _sync_result, None
+    return res
 
 
 # ---------------------------------------------------------------------------

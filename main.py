@@ -45,7 +45,7 @@ from modules.voice_control import process_voice_command
 from modules.theme_manager import apply_theme
 from modules.quiz_mode import start_quiz_mode
 from modules.web_control import start_web_server
-from modules.google_drive_sync import sync_drive
+from modules.google_drive_sync import start_background_sync, take_sync_result, is_syncing
 from modules.special_days import check_special_days, prioritize_for_today
 from modules.on_this_day import todays_flashbacks
 from modules.upload_qr import show_upload_qr_if_scheduled
@@ -664,21 +664,27 @@ def main():
                 _health_check(config)
                 last_health_check = current_ts
 
-            # ---- GOOGLE DRIVE SYNC (throttled) ----
-            if config.get("cloud_backup_enabled", False) and current_ts - last_drive_sync > drive_sync_interval:
-                try:
-                    downloaded, uploaded, family_added = sync_drive(config, screens)
-                    if downloaded:
-                        print(f"[Selah] Drive sync: {downloaded} new photo(s)")
-                    # One toast per sync that brought new shared-folder uploads —
-                    # the "someone added to the folder" alert, not per-pic and not
-                    # for the personal-folder bulk sync.
-                    if family_added:
-                        show_toast_if_needed(screens, config,
-                                             f"{family_added} new photo(s) shared!")
-                except Exception as e:
-                    log_error(f"Drive sync failed: {e}", config=config)
+            # ---- GOOGLE DRIVE SYNC (throttled, runs in the background) ----
+            # The sync downloads on a daemon thread so the slideshow never
+            # stalls; we pick up its result on a later loop iteration.
+            if (config.get("cloud_backup_enabled", False)
+                    and current_ts - last_drive_sync > drive_sync_interval
+                    and not is_syncing()):
+                start_background_sync(config)
                 last_drive_sync = current_ts
+
+            drive_result = take_sync_result()
+            if drive_result:
+                downloaded, uploaded, family_added = drive_result
+                if downloaded:
+                    print(f"[Selah] Drive sync: {downloaded} new photo(s)")
+                    last_media_refresh = 0  # fold new photos into rotation promptly
+                # One toast per sync that brought new shared-folder uploads —
+                # the "someone added to the folder" alert, not per-pic and not
+                # for the personal-folder bulk sync.
+                if family_added:
+                    show_toast_if_needed(screens, config,
+                                         f"{family_added} new photo(s) shared!")
 
             # ---- PERIODIC MEDIA REFRESH ----
             if current_ts - last_media_refresh > media_refresh_interval:
