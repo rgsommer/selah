@@ -192,10 +192,10 @@ def get_images_and_videos(config):
             collect_files(art_dir, orientation=None)
             collect_files(display_dir, orientation=None)
 
-            # Drive-pulled photos. Only scan separately if not already covered
-            # by a folder above (e.g. media/display/drive lives under display_dir,
-            # which is scanned recursively — scanning again would double them).
-            drive_pull_dir = config.get("drive_pull_dir", "media/display/drive")
+            # Drive-pulled photos (media/shared_drive). Scan it unless it's
+            # nested inside a folder already scanned recursively above, which
+            # would double the files in the rotation.
+            drive_pull_dir = config.get("drive_pull_dir", "media/shared_drive")
             dp_abs = os.path.abspath(drive_pull_dir)
             already = any(
                 dp_abs == os.path.abspath(s) or dp_abs.startswith(os.path.abspath(s) + os.sep)

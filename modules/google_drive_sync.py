@@ -226,38 +226,44 @@ def pull_from_drive(config, screens=None):
     return new_files
 
 
-def _pull_one_folder(service, folder_id, config, downloaded, new_files, media_index=None):
-    """Pull new media from a single Drive folder. Mutates downloaded/new_files."""
+def _pull_one_folder(service, folder_id, config, downloaded, new_files,
+                     media_index=None, subpath=""):
+    """Pull media from a Drive folder into media/shared_drive, recursing into
+    subfolders so the local tree mirrors Drive exactly. Mutates downloaded/
+    new_files."""
     media_index = media_index or set()
-    # Build the MIME type query
-    mime_queries = " or ".join(
-        f"mimeType='{m}'" for m in ALL_MEDIA_MIMES.keys()
-    )
-    query = f"'{folder_id}' in parents and ({mime_queries}) and trashed=false"
+    drive_root = Path(config.get("drive_pull_dir", "media/shared_drive"))
 
     page_token = None
     while True:
         response = service.files().list(
-            q=query,
+            q=f"'{folder_id}' in parents and trashed=false",
             spaces="drive",
-            fields="nextPageToken, files(id, name, mimeType, modifiedTime, size)",
+            fields="nextPageToken, files(id, name, mimeType)",
             pageToken=page_token,
             pageSize=100,
         ).execute()
 
         for file_info in response.get("files", []):
+            mime_type = file_info.get("mimeType", "")
+            file_name = file_info.get("name", "")
+
+            # Recurse into subfolders, replicating the path under shared_drive.
+            if mime_type == "application/vnd.google-apps.folder":
+                _pull_one_folder(service, file_info["id"], config, downloaded,
+                                 new_files, media_index,
+                                 os.path.join(subpath, file_name))
+                continue
+            if mime_type not in ALL_MEDIA_MIMES:
+                continue
+
             file_id = file_info["id"]
             if file_id in downloaded:
                 continue  # Already have this one
 
-            file_name = file_info["name"]
-            mime_type = file_info["mimeType"]
             ext = ALL_MEDIA_MIMES.get(mime_type, "")
-
-            # Ensure file has the right extension
             if not file_name.lower().endswith(tuple(ALL_MEDIA_MIMES.values())):
-                base, _ = os.path.splitext(file_name)
-                file_name = base + ext
+                file_name = os.path.splitext(file_name)[0] + ext
 
             # Already have this file on disk (e.g. an rsync'd library)? Record
             # its ID so we never re-download it, and skip.
@@ -268,35 +274,13 @@ def _pull_one_folder(service, folder_id, config, downloaded, new_files, media_in
                 }
                 continue
 
-            # Drive-sourced photos live under their own folder (media/drive).
-            drive_root = Path(config.get("drive_pull_dir", "media/display/drive"))
-            dest_dir = drive_root
-
-            # If the file sits inside a subfolder on Drive, replicate that
-            # subfolder under media/drive so the local tree mirrors Drive.
-            try:
-                parents = service.files().get(
-                    fileId=file_id, fields="parents"
-                ).execute().get("parents", [])
-                if parents and parents[0] != folder_id:
-                    parent_info = service.files().get(
-                        fileId=parents[0], fields="name"
-                    ).execute()
-                    parent_name = parent_info.get("name", "")
-                    if parent_name:
-                        dest_dir = drive_root / parent_name
-            except Exception:
-                pass  # Fall back to media/drive root
-
+            dest_dir = drive_root / subpath if subpath else drive_root
             dest_dir.mkdir(parents=True, exist_ok=True)
             dest_path = dest_dir / file_name
-
-            # Avoid overwriting if a file with same name already exists
             if dest_path.exists():
                 base, ext_part = os.path.splitext(file_name)
                 dest_path = dest_dir / f"{base}_{file_id[:8]}{ext_part}"
 
-            # Download the file
             try:
                 request = service.files().get_media(fileId=file_id)
                 with open(dest_path, "wb") as fh:
@@ -313,7 +297,7 @@ def _pull_one_folder(service, folder_id, config, downloaded, new_files, media_in
                 }
                 _maybe_downscale(dest_path, config)
                 new_files.append(str(dest_path))
-                print(f"[Drive Sync] Downloaded: {file_name} -> {dest_path}")
+                print(f"[Drive Sync] Downloaded: {os.path.join(subpath, file_name)}")
             except Exception as e:
                 log_error(f"Failed to download {file_name}: {e}", config=config)
 
@@ -551,7 +535,8 @@ def push_to_drive(config, file_paths=None, max_uploads=None):
     # Mirror the local folder structure into Drive (default on) so uploads land
     # in the same subfolders they live in locally.
     mirror = config.get("drive_mirror_structure", True)
-    media_root = config.get("media_folder", "media")
+    shared_root = os.path.abspath(config.get("drive_pull_dir", "media/shared_drive"))
+    media_root = os.path.abspath(config.get("media_folder", "media"))
     folder_cache = {}
 
     for file_path in file_paths:
@@ -573,7 +558,16 @@ def push_to_drive(config, file_paths=None, max_uploads=None):
             parent_id = folder_id
             if mirror:
                 try:
-                    rel_dir = os.path.dirname(os.path.relpath(file_path, media_root))
+                    ap = os.path.abspath(file_path)
+                    # Files in the shared mirror map to the Drive folder root
+                    # (so export structure == import structure, no wrapper).
+                    if ap.startswith(shared_root + os.sep):
+                        base = shared_root
+                    elif ap.startswith(media_root + os.sep):
+                        base = media_root
+                    else:
+                        base = os.path.dirname(ap)
+                    rel_dir = os.path.dirname(os.path.relpath(ap, base))
                     parent_id = _ensure_drive_folder_path(service, folder_id, rel_dir, folder_cache)
                 except Exception as e:
                     log_error(f"Mirror path failed for {file_path}: {e}", config=config)
@@ -746,17 +740,16 @@ def _guess_mime(file_path):
 
 
 def _collect_all_local_media(config):
-    """Collect all media file paths from local media directories.
+    """Collect media files for push: the shared_drive mirror folder only.
 
-    Skips the Drive-pull folder (those files came FROM Drive — pushing them
-    back would just nest a duplicate folder)."""
-    media_folder = config.get("media_folder", "media")
+    media/shared_drive is the two-way mirror of the Drive source folder, so
+    push exports exactly what's there (preserving subfolders). The rest of the
+    local library (e.g. an rsync'd media/display) is local-only and is NOT
+    pushed, which also avoids it being re-imported by the recursive pull."""
+    shared_root = config.get("drive_pull_dir", "media/shared_drive")
     valid_exts = tuple(config.get("valid_extensions", [".jpg", ".jpeg", ".png", ".mp4", ".avi", ".mov"]))
-    skip_root = os.path.abspath(config.get("drive_pull_dir", "media/display/drive"))
     files = []
-    for path in Path(media_folder).rglob("*"):
+    for path in Path(shared_root).rglob("*"):
         if path.suffix.lower() in valid_exts and path.is_file():
-            if os.path.abspath(str(path)).startswith(skip_root + os.sep):
-                continue
             files.append(str(path))
     return files
