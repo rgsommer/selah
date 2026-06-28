@@ -100,15 +100,18 @@ def show_status_line(screens, config):
         time_str = now.strftime("%H:%M")
 
     parts = [time_str]
-    weather = _get_weather(config)
-    if weather:
-        parts.append(f"{weather['temp']}°C")
-        hi = weather.get("temp_max")
-        cond = weather.get("description", "")
-        if hi is not None:
-            parts.append(f"Today {hi}°C  {cond}".strip())
-        elif cond:
-            parts.append(cond)
+    # The corner weather pill owns the weather glance, so the status line is
+    # time-only by default. Opt back in with status_line_weather: true.
+    if config.get("status_line_weather", False):
+        weather = _get_weather(config)
+        if weather:
+            parts.append(f"{weather['temp']}°C")
+            hi = weather.get("temp_max")
+            cond = weather.get("description", "")
+            if hi is not None:
+                parts.append(f"Today {hi}°C  {cond}".strip())
+            elif cond:
+                parts.append(cond)
 
     text = "    ".join(parts)
     position = config.get("status_line_position", "top")

@@ -79,6 +79,7 @@ DEFAULT_CONFIG = {
     "weather_api_key": "",
     "status_line_enabled": False,
     "status_line_position": "top",
+    "status_line_weather": False,
     "weather_pill_enabled": True,
     "weather_pill_position": "top-right",
     "location": "Hamilton,CA",
