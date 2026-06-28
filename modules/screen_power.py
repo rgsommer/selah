@@ -24,6 +24,17 @@ def is_off():
     return _state["off"]
 
 
+def prevent_sleep():
+    """Stop the OS from blanking/sleeping the screens during the slideshow.
+
+    Disables the X11 screensaver and DPMS (the usual cause on Raspberry Pi OS).
+    Best-effort and safe to call repeatedly; no-op where xset isn't present.
+    """
+    _run("xset s off")        # no screensaver
+    _run("xset s noblank")    # don't blank the framebuffer
+    _run("xset -dpms")        # no DPMS power-down (sleep)
+
+
 def screen_off():
     """Blank the HDMI output (no backlight). Idempotent."""
     if _state["off"]:

@@ -435,6 +435,11 @@ def main():
 
     print(f"[Selah] Initialized screens: {list(screens.keys())}")
 
+    # Stop the OS from blanking/sleeping the screens during the slideshow.
+    if config.get("prevent_screen_sleep", True):
+        from modules.screen_power import prevent_sleep
+        prevent_sleep()
+
     try:
         # Start web control server if enabled
         if config.get("web_control_enabled", False):
@@ -502,6 +507,7 @@ def main():
         last_media_refresh = 0
         last_drive_sync = 0
         last_health_check = 0
+        last_awake_assert = 0
         health_check_interval = 3600  # disk check hourly
         email_check_interval = 60  # Check email every 60 seconds
         media_refresh_interval = 120  # Refresh file list every 2 minutes
@@ -663,6 +669,18 @@ def main():
             if config.get("health_watchdog_enabled", False) and current_ts - last_health_check > health_check_interval:
                 _health_check(config)
                 last_health_check = current_ts
+
+            # ---- KEEP-AWAKE (re-assert no-blank/no-DPMS, throttled) ----
+            # Some environments reset xset settings; re-apply periodically, but
+            # not while the screen is intentionally blanked for night mode.
+            if config.get("prevent_screen_sleep", True) and current_ts - last_awake_assert > 240:
+                try:
+                    from modules.screen_power import prevent_sleep, is_off
+                    if not is_off():
+                        prevent_sleep()
+                except Exception:
+                    pass
+                last_awake_assert = current_ts
 
             # ---- GOOGLE DRIVE SYNC (throttled, runs in the background) ----
             # The sync downloads on a daemon thread so the slideshow never
