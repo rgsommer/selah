@@ -16,21 +16,36 @@ cd "$SELAH_DIR"
 SELAH_USER="$(whoami)"
 echo "Installing into: $SELAH_DIR (service user: $SELAH_USER)"
 
-# Update and install dependencies
+# --- Dependencies (Debian Trixie / Raspberry Pi OS) ------------------------
 sudo apt update
-sudo apt install -y python3 python3-pip python3-dev python3-venv libatlas-base-dev \
-    libopenjp2-7 libtiff5-dev libjpeg-dev libpng-dev zlib1g-dev libfreetype6-dev \
-    liblcms2-dev libwebp-dev tcl8.6-dev tk8.6-dev python3-tk libportaudio2 \
-    portaudio19-dev libopencv-dev python3-opencv vlc libvlc-dev python3-speechrecognition \
-    python3-flask python3-requests python3-bs4 python3-google-auth python3-google-auth-oauthlib \
-    python3-google-auth-httplib2 python3-pil
 
-# Install Python packages
-pip3 install --user pygame face_recognition Pillow google-api-python-client oauthlib requests-oauthlib qrcode
+# Core — must succeed (the slideshow itself).
+sudo apt install -y python3 python3-pip python3-pygame python3-pil python3-numpy python3-requests
 
-# Install Raspberry Pi camera support
-sudo apt install -y libcamera-apps-lite
-sudo raspi-config nonint do_camera 0 || true
+# Optional features — prebuilt from apt; don't abort if a name differs on this
+# OS release.
+sudo apt install -y \
+    python3-opencv python3-flask python3-bs4 \
+    python3-google-auth python3-google-auth-oauthlib python3-google-auth-httplib2 \
+    python3-oauthlib python3-requests-oauthlib \
+    python3-vlc vlc python3-speechrecognition python3-pyaudio python3-qrcode \
+    libcamera-apps || true
+
+# pip-only bits. Trixie's system Python is "externally managed" (PEP 668), so
+# pip needs --break-system-packages on this dedicated appliance.
+pip3 install --break-system-packages --no-input google-api-python-client || true
+python3 -c "import qrcode" 2>/dev/null || pip3 install --break-system-packages --no-input qrcode || true
+
+# Face recognition is heavy (compiles dlib) and optional — opt in with SELAH_FACE=1.
+if [ "${SELAH_FACE:-0}" = "1" ]; then
+    echo "Installing face recognition (compiles dlib — this is slow)..."
+    sudo apt install -y cmake build-essential || true
+    pip3 install --break-system-packages --no-input dlib face_recognition \
+        || echo "face_recognition failed to build — skipping (optional)."
+fi
+
+# Raspberry Pi camera (best-effort)
+sudo raspi-config nonint do_camera 0 2>/dev/null || true || true
 
 # Create media directories
 mkdir -p media/portrait media/landscape media/art media/display
