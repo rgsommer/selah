@@ -9,6 +9,10 @@
 #
 cd "$(dirname "$0")"
 export DISPLAY="${DISPLAY:-:0}"
+# Over SSH, point at the desktop session's X authority so we can reach :0.
+if [ -z "$XAUTHORITY" ] && [ -f "$HOME/.Xauthority" ]; then
+    export XAUTHORITY="$HOME/.Xauthority"
+fi
 
 echo "=================== DISPLAY ENV ==================="
 echo "DISPLAY = $DISPLAY"
