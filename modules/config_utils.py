@@ -81,6 +81,7 @@ DEFAULT_CONFIG = {
     "status_line_enabled": False,
     "status_line_position": "top",
     "status_line_weather": False,
+    "new_photo_hint_seconds": 90,
     "overlay_band_persist": True,
     "overlay_fade_in_enabled": True,
     "overlay_fade_seconds": 2.5,

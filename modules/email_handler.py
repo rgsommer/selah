@@ -91,8 +91,10 @@ def check_for_new_emails(config, screens):
                                 except Exception:
                                     pass
                                 try:
-                                    from modules.toast import queue_toast
-                                    queue_toast(f"New photo from {sender.split('<')[0].strip()}")
+                                    # Subtle 👀 beside the clock instead of a
+                                    # full-width "New photo from ..." banner.
+                                    from modules.new_photo_hint import note_new_photo
+                                    note_new_photo()
                                 except Exception:
                                     pass
                                 log_media(file_path, sender, final_date, caption)

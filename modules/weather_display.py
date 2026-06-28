@@ -108,12 +108,22 @@ def _status_text(config):
     return "    ".join(parts)
 
 
+def _eyes_active(config):
+    """Whether the subtle 'new photo' eyes hint should show beside the time."""
+    try:
+        from modules.new_photo_hint import is_active
+        return is_active(config)
+    except Exception:
+        return False
+
+
 def show_status_line(screens, config):
     """Draw the one-line glance bar straight to the screen(s) and flip."""
     text = _status_text(config)
     position = config.get("status_line_position", "top")
+    eyes = _eyes_active(config)
     for screen in screens.values():
-        _render_status_line(screen, text, position)
+        _render_status_line(screen, text, position, eyes)
     try:
         pygame.display.flip()
     except Exception:
@@ -126,11 +136,12 @@ def draw_status_line(screen, config, target):
     Returns True if anything was drawn. `screen` is used only for sizing.
     """
     _render_status_line(target, _status_text(config),
-                        config.get("status_line_position", "top"))
+                        config.get("status_line_position", "top"),
+                        _eyes_active(config))
     return True
 
 
-def _render_status_line(target, text, position):
+def _render_status_line(target, text, position, show_eyes=False):
     """Render the glance bar as a thin translucent strip at top or bottom."""
     try:
         w, h = target.get_size()
@@ -144,6 +155,13 @@ def _render_status_line(target, text, position):
         bg.fill((0, 0, 0, 150))
         target.blit(bg, (0, by))
         target.blit(surf, (14, by + 6))
+        if show_eyes:
+            try:
+                from modules.new_photo_hint import draw_eyes
+                draw_eyes(target, 14 + surf.get_width() + max(10, bar_h // 3),
+                          by + bar_h // 2, bar_h)
+            except Exception:
+                pass
     except Exception as e:
         log_error(f"Status line render failed: {e}")
 
