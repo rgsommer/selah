@@ -304,6 +304,10 @@ def main():
             "last_motion": time.time(),
             "new_media": None,
         }
+        # Cover extra same-orientation screens (e.g. 'landscape_2') so they get
+        # their own rotation index instead of being skipped.
+        for _sk in screens:
+            state.setdefault(_sk, {"index": 0, "paused_until": 0})
 
         rotate_interval = config.get("rotate_interval", 10)
         motion_timeout = config.get("motion_timeout", 300)
@@ -517,10 +521,13 @@ def main():
 
             # ---- MAIN SLIDESHOW ROTATION ----
             if state.get("slideshow_active", True) or not config.get("motion_triggered_slideshow", False):
-                is_single_screen = len([k for k in screens if k in ("portrait", "landscape")]) == 1
+                photo_screens = [k for k in screens
+                                 if k.startswith("portrait") or k.startswith("landscape")]
+                is_single_screen = len(photo_screens) == 1
 
                 for screen_type, screen in screens.items():
-                    if screen_type not in ("portrait", "landscape"):
+                    # Handle every photo screen, including 'landscape_2'/'portrait_2'.
+                    if not (screen_type.startswith("portrait") or screen_type.startswith("landscape")):
                         continue
                     # Skip if manually paused
                     if current_ts < state.get(screen_type, {}).get("paused_until", 0):
@@ -533,7 +540,7 @@ def main():
                         combined = list(dict.fromkeys(combined))
                         files = combined
                     else:
-                        files = landscape_files if screen_type == "landscape" else portrait_files
+                        files = portrait_files if screen_type.startswith("portrait") else landscape_files
 
                     if not files:
                         # Show a "no media" placeholder
