@@ -55,6 +55,21 @@ _IMAGE_EXTS = (".jpg", ".jpeg", ".png")
 SYNC_STATE_FILE = "drive_sync_state.json"
 
 
+def build_media_index(config):
+    """Set of lowercased filenames already present anywhere under the media
+    folder. Used to skip re-downloading photos that are already on disk (e.g.
+    an rsync'd library) when the Drive sync state doesn't yet know their IDs."""
+    root = config.get("media_folder", "media")
+    index = set()
+    try:
+        for dirpath, _dirs, files in os.walk(root):
+            for f in files:
+                index.add(f.lower())
+    except Exception as e:
+        log_error(f"Media index build failed: {e}")
+    return index
+
+
 def _maybe_downscale(path, config):
     """Shrink a just-downloaded image to a max long edge so 12MP+ originals
     don't fill the disk. No-op for video, small images, or if disabled."""
@@ -193,10 +208,11 @@ def pull_from_drive(config, screens=None):
     sync_state = load_sync_state()
     downloaded = sync_state.get("downloaded", {})
     new_files = []
+    media_index = build_media_index(config)
 
     for folder_id in folder_ids:
         try:
-            _pull_one_folder(service, folder_id, config, downloaded, new_files)
+            _pull_one_folder(service, folder_id, config, downloaded, new_files, media_index)
         except Exception as e:
             log_error(f"Drive pull failed for folder {folder_id}: {e}", config=config)
 
@@ -210,8 +226,9 @@ def pull_from_drive(config, screens=None):
     return new_files
 
 
-def _pull_one_folder(service, folder_id, config, downloaded, new_files):
+def _pull_one_folder(service, folder_id, config, downloaded, new_files, media_index=None):
     """Pull new media from a single Drive folder. Mutates downloaded/new_files."""
+    media_index = media_index or set()
     # Build the MIME type query
     mime_queries = " or ".join(
         f"mimeType='{m}'" for m in ALL_MEDIA_MIMES.keys()
@@ -241,6 +258,15 @@ def _pull_one_folder(service, folder_id, config, downloaded, new_files):
             if not file_name.lower().endswith(tuple(ALL_MEDIA_MIMES.values())):
                 base, _ = os.path.splitext(file_name)
                 file_name = base + ext
+
+            # Already have this file on disk (e.g. an rsync'd library)? Record
+            # its ID so we never re-download it, and skip.
+            if file_name.lower() in media_index:
+                downloaded[file_id] = {
+                    "name": file_name, "have_local": True,
+                    "downloaded_at": datetime.datetime.now().isoformat(),
+                }
+                continue
 
             # Determine destination folder
             dest_dir = Path(config.get("display_dir", "media/display"))
