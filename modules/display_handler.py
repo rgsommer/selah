@@ -112,41 +112,39 @@ def init_displays():
 
 
 def _init_dual_displays(monitors):
-    """Try to create two separate display windows for dual-screen setup."""
+    """One borderless window spanning all monitors; each monitor is a subsurface.
+
+    This uses the single display surface created by set_mode(), so the normal
+    pygame.display.flip() in the render code updates EVERY screen. (The old
+    SDL2 multi-window approach created separate windows that flip() never
+    refreshed — they stayed black.)
+    """
     screens = {}
     try:
-        from pygame._sdl2.video import Window
-    except ImportError:
-        log_error("pygame SDL2 not available for dual display, falling back to single")
+        total_w = max(m["x"] + m["w"] for m in monitors)
+        total_h = max(m["y"] + m["h"] for m in monitors)
+
+        # Place the window at the top-left of the combined desktop so it spans
+        # all heads. NOFRAME = borderless, no fullscreen mode-switch surprises.
+        os.environ.setdefault("SDL_VIDEO_WINDOW_POS", "0,0")
+        screen = pygame.display.set_mode((total_w, total_h), pygame.NOFRAME)
+        pygame.display.set_caption("Selah Display")
+
+        # Left-to-right so the first physical screen is the primary one.
+        for mon in sorted(monitors, key=lambda m: (m["x"], m["y"])):
+            orientation = "portrait" if mon["h"] > mon["w"] else "landscape"
+            if orientation in screens:
+                orientation = f"{orientation}_2"
+            try:
+                screens[orientation] = screen.subsurface(
+                    (mon["x"], mon["y"], mon["w"], mon["h"]))
+            except ValueError as e:
+                log_error(f"Subsurface for {mon.get('name')} out of range: {e}")
+        return screens
+
+    except Exception as e:
+        log_error(f"Dual display init failed: {e}")
         return {}
-
-    windows = []
-    for mon in monitors:
-        orientation = "portrait" if mon["h"] > mon["w"] else "landscape"
-        if orientation in screens:
-            orientation = f"{orientation}_2"
-
-        try:
-            win = Window(
-                f"Selah {orientation}",
-                size=(mon["w"], mon["h"]),
-                position=(mon["x"], mon["y"]),
-                borderless=True,
-            )
-            surface = win.get_surface()
-            screens[orientation] = surface
-            windows.append(win)
-        except Exception as e:
-            log_error(f"Failed to create window for {mon['name']}: {e}")
-            # Don't abort — try the next monitor
-            continue
-
-    # Store window references so they don't get garbage collected
-    if not hasattr(init_displays, '_windows'):
-        init_displays._windows = []
-    init_displays._windows = windows
-
-    return screens
 
 
 def _init_single_display():
