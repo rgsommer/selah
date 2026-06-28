@@ -94,7 +94,7 @@ def check_for_new_emails(config, screens):
                                     # Subtle 👀 beside the clock instead of a
                                     # full-width "New photo from ..." banner.
                                     from modules.new_photo_hint import note_new_photo
-                                    note_new_photo()
+                                    note_new_photo(kind="email")
                                 except Exception:
                                     pass
                                 log_media(file_path, sender, final_date, caption)

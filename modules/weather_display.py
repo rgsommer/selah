@@ -157,9 +157,9 @@ def _render_status_line(target, text, position, show_eyes=False):
         target.blit(surf, (14, by + 6))
         if show_eyes:
             try:
-                from modules.new_photo_hint import draw_eyes
-                draw_eyes(target, 14 + surf.get_width() + max(10, bar_h // 3),
-                          by + bar_h // 2, bar_h)
+                from modules.new_photo_hint import draw_glyph, current_kind
+                draw_glyph(target, 14 + surf.get_width() + max(10, bar_h // 3),
+                           by + bar_h // 2, bar_h, current_kind())
             except Exception:
                 pass
     except Exception as e:
