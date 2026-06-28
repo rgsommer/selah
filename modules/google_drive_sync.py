@@ -269,7 +269,7 @@ def _pull_one_folder(service, folder_id, config, downloaded, new_files, media_in
                 continue
 
             # Drive-sourced photos live under their own folder (media/drive).
-            drive_root = Path(config.get("drive_pull_dir", "media/drive"))
+            drive_root = Path(config.get("drive_pull_dir", "media/display/drive"))
             dest_dir = drive_root
 
             # If the file sits inside a subfolder on Drive, replicate that
@@ -752,7 +752,7 @@ def _collect_all_local_media(config):
     back would just nest a duplicate folder)."""
     media_folder = config.get("media_folder", "media")
     valid_exts = tuple(config.get("valid_extensions", [".jpg", ".jpeg", ".png", ".mp4", ".avi", ".mov"]))
-    skip_root = os.path.abspath(config.get("drive_pull_dir", "media/drive"))
+    skip_root = os.path.abspath(config.get("drive_pull_dir", "media/display/drive"))
     files = []
     for path in Path(media_folder).rglob("*"):
         if path.suffix.lower() in valid_exts and path.is_file():

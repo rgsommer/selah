@@ -191,7 +191,18 @@ def get_images_and_videos(config):
             collect_files(landscape_dir, landscape_by_folder, orientation="landscape")
             collect_files(art_dir, orientation=None)
             collect_files(display_dir, orientation=None)
-            collect_files(config.get("drive_pull_dir", "media/drive"), orientation=None)
+
+            # Drive-pulled photos. Only scan separately if not already covered
+            # by a folder above (e.g. media/display/drive lives under display_dir,
+            # which is scanned recursively — scanning again would double them).
+            drive_pull_dir = config.get("drive_pull_dir", "media/display/drive")
+            dp_abs = os.path.abspath(drive_pull_dir)
+            already = any(
+                dp_abs == os.path.abspath(s) or dp_abs.startswith(os.path.abspath(s) + os.sep)
+                for s in (portrait_dir, landscape_dir, art_dir, display_dir)
+            )
+            if not already:
+                collect_files(drive_pull_dir, orientation=None)
 
             # Collect dated folders (e.g., media/2025-05-10/)
             media_path = Path(media_folder)
