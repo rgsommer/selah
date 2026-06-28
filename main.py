@@ -345,16 +345,17 @@ def main():
             # On-this-day flashbacks — queue once each morning.
             _check_flashbacks(state, config, portrait_files, landscape_files, screens)
 
-            # Handle keyboard/touch events (also processes ESC to exit)
+            # Drain the event queue ONCE, then share it with both handlers so
+            # neither starves the other (this is why F-keys never fired before).
+            events = pygame.event.get()
             try:
-                state = handle_events(screens, config, portrait_files, landscape_files, state)
+                state = handle_events(screens, config, portrait_files, landscape_files, state, events)
             except SystemExit:
                 print("[Selah] Shutting down...")
                 break
 
-            # Handle F-key events separately (handle_events consumes events,
-            # so we check for F-keys that weren't consumed)
-            for event in pygame.event.get():
+            # F-key actions (live in main.py because they call its UIs).
+            for event in events:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         print("[Selah] ESC pressed - shutting down.")

@@ -5,21 +5,27 @@ import pygame
 from modules.logger import log_error
 
 
-def handle_events(screens, config, portrait_files, landscape_files, state):
+def handle_events(screens, config, portrait_files, landscape_files, state, events=None):
     """Process keyboard/touch events for manual navigation and system control.
 
     Arrow keys:
         Left/Right: navigate landscape display
         Up/Down: navigate portrait display
     ESC: exit system
-    F-keys handled in main loop (F1-F4)
+    F-keys handled in main loop (F1-F5)
+
+    `events` is the already-drained event list from the main loop (so the F-key
+    handler there sees the same events). Falls back to draining the queue itself
+    if not provided.
 
     Returns updated state dict.
     """
     try:
         pause_duration = config.get("manual_navigation_pause", 60)
 
-        for event in pygame.event.get():
+        if events is None:
+            events = pygame.event.get()
+        for event in events:
             if event.type == pygame.QUIT:
                 pygame.quit()
                 raise SystemExit("User quit")
