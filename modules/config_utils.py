@@ -16,6 +16,7 @@ DEFAULT_CONFIG = {
     "manual_navigation_pause": 60,
     "layout_variety_enabled": True,
     "layout_fade_enabled": True,
+    "transition_style": "random",
     "layout_weights": {"single": 50, "split": 20, "cascade": 20, "tile3": 30, "tile6": 20},
     "photo_effects_enabled": False,
     "photo_effect_chance": 15,

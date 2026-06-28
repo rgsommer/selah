@@ -303,6 +303,7 @@ def show_config_gui(screen, config):
             ("tile3", "  Layout: Tile 3", "layoutbool"),
             ("tile6", "  Layout: Tile 6", "layoutbool"),
             ("layout_fade_enabled", "  Fade Transitions", "bool"),
+            ("transition_style", "  Transition (crossfade/fade_black/random)", "str"),
             ("photo_effects_enabled", "Photo Effects (random)", "bool"),
             ("photo_effect_chance", "  Effect Chance (%)", "int"),
             ("photo_effect_sepia", "  Use Sepia", "bool"),

@@ -624,10 +624,47 @@ def _present_split(screen, new_frame, animate=True):
         log_error(f"Split transition failed: {e}")
 
 
-def _present(screen, frame, fade=True):
-    """Blit a finished frame to the screen, optionally crossfading from the old."""
+def _pick_transition(config):
+    """Which transition to use: crossfade, fade_black, or a random one."""
+    ts = (config.get("transition_style") or "crossfade").lower()
+    if ts == "random":
+        return random.choice(["crossfade", "fade_black"])
+    return ts
+
+
+def _fade_through_black(screen, frame):
+    """Fade the current frame down to black, then fade the new one up."""
     try:
-        if fade:
+        w, h = screen.get_size()
+        old = screen.copy()
+        black = pygame.Surface((w, h))
+        black.fill((0, 0, 0))
+        for a in range(0, 256, 30):          # old -> black
+            screen.blit(old, (0, 0))
+            black.set_alpha(a)
+            screen.blit(black, (0, 0))
+            pygame.display.flip()
+            pygame.time.delay(14)
+        for a in range(0, 256, 30):          # black -> new
+            screen.fill((0, 0, 0))
+            frame.set_alpha(a)
+            screen.blit(frame, (0, 0))
+            pygame.display.flip()
+            pygame.time.delay(14)
+        frame.set_alpha(255)
+        screen.blit(frame, (0, 0))
+        pygame.display.flip()
+    except Exception as e:
+        log_error(f"Fade-through-black failed: {e}")
+
+
+def _present(screen, frame, fade=True, style="crossfade"):
+    """Blit a finished frame to the screen, with the chosen transition."""
+    try:
+        if fade and style == "fade_black":
+            _fade_through_black(screen, frame)
+            return
+        if fade:  # crossfade
             old = screen.copy()
             for alpha in range(0, 256, 28):
                 frame.set_alpha(alpha)
@@ -669,6 +706,7 @@ def show_layout(screen, image_paths, config, mode, file_meta=None, fade=True):
             date, cap = file_meta or (None, None)
             frame = _build_single_frame(screen, image_paths[0], config, date, cap)
 
-        _present(screen, frame, fade=fade and config.get("layout_fade_enabled", True))
+        _present(screen, frame, fade=fade and config.get("layout_fade_enabled", True),
+                 style=_pick_transition(config))
     except Exception as e:
         log_error(f"show_layout failed ({mode}): {e}")

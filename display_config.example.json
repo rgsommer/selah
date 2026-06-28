@@ -10,6 +10,7 @@
   "manual_navigation_pause": 60,
   "layout_variety_enabled": true,
   "layout_fade_enabled": true,
+  "transition_style": "random",
   "layout_weights": {"single": 50, "tile3": 30, "tile6": 20},
   "photo_effects_enabled": false,
   "photo_effect_chance": 15,
