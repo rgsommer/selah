@@ -133,19 +133,20 @@ def get_active_photo_keywords():
 
 
 def prioritize_for_today(files, config):
-    """Front-load files whose names contain today's active keyword(s).
+    """Front-load files whose path contains today's active keyword(s).
 
-    Returns a new list with matches first (order otherwise preserved). A no-op
-    when no special day with a photo_keyword is active, so it's safe to call
-    on every media refresh.
+    Matches the whole path (not just the filename), so a keyword like
+    "sarah-lynn" pulls in photos kept in a folder named for that person —
+    e.g. media/display/5Sarah-Lynn/anything.jpg. No-op when no special day
+    with a photo_keyword is active, so it's safe to call on every refresh.
     """
     keywords = get_active_photo_keywords()
     if not keywords or not files:
         return files
     matched, rest = [], []
     for f in files:
-        base = os.path.basename(str(f)).lower()
-        (matched if any(k in base for k in keywords) else rest).append(f)
+        path = str(f).lower()
+        (matched if any(k in path for k in keywords) else rest).append(f)
     return matched + rest if matched else files
 
 
