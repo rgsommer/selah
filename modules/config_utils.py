@@ -81,7 +81,7 @@ DEFAULT_CONFIG = {
     "status_line_position": "top",
     "weather_pill_enabled": True,
     "weather_pill_position": "top-right",
-    "location": "Hamilton,ON",
+    "location": "Hamilton,CA",
     "voice_control_enabled": False,
     "web_control_enabled": False,
     "web_control_password": "selah123",

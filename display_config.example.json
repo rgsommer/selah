@@ -75,7 +75,7 @@
   "status_line_position": "top",
   "weather_pill_enabled": true,
   "weather_pill_position": "top-right",
-  "location": "Hamilton,ON",
+  "location": "Hamilton,CA",
   "weather_time": "08:00",
   "weather_times": ["08:00"],
   "weather_display_seconds": 60,

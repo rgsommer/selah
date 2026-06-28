@@ -149,7 +149,7 @@ def _get_weather(config):
     if not api_key or api_key == "your_openweathermap_api_key":
         return _cached_weather
 
-    location = config.get("location", "Hamilton,ON")
+    location = config.get("location", "Hamilton,CA")
 
     now = datetime.datetime.now()
     if _last_weather_check and (now - _last_weather_check).seconds < 1800:
@@ -186,6 +186,7 @@ def _fetch_openweathermap(api_key, location):
             return {
                 "temp": round(data["main"]["temp"]),
                 "temp_max": round(data["main"].get("temp_max", data["main"]["temp"])),
+                "temp_min": round(data["main"].get("temp_min", data["main"]["temp"])),
                 "feels_like": round(data["main"]["feels_like"]),
                 "description": data["weather"][0]["description"].title(),
                 "main": data["weather"][0]["main"],
@@ -218,7 +219,7 @@ def _get_forecast(config):
     if _last_forecast_check and (now - _last_forecast_check).seconds < 3600:
         return _cached_forecast
 
-    fc = _fetch_forecast(api_key, config.get("location", "Hamilton,ON"))
+    fc = _fetch_forecast(api_key, config.get("location", "Hamilton,CA"))
     if fc:
         _cached_forecast = fc
         _last_forecast_check = now
@@ -327,9 +328,18 @@ def show_weather_pill(screens, config):
     weather = _get_weather(config)
     if not weather:
         return
+    # Prefer today's High/Low from the 5-day forecast (the current-conditions
+    # endpoint reports min≈max≈now, so it can't give a real daily range).
+    hi = weather.get("temp_max", weather["temp"])
+    lo = weather.get("temp_min", weather["temp"])
+    forecast = _get_forecast(config)
+    if forecast:
+        today = datetime.datetime.now().strftime("%a")
+        td = next((d for d in forecast if d.get("day") == today), forecast[0])
+        hi, lo = td.get("hi", hi), td.get("lo", lo)
     pos = config.get("weather_pill_position", "top-right")
     for screen in screens.values():
-        _render_pill(screen, weather, pos)
+        _render_pill(screen, weather, pos, hi, lo)
 
 
 def _cloud(surf, cx, cy, r, color):
@@ -374,12 +384,16 @@ def _draw_weather_icon(surf, cx, cy, r, main):
         pass
 
 
-def _render_pill(screen, weather, pos):
+def _render_pill(screen, weather, pos, hi=None, lo=None):
     try:
+        if hi is None:
+            hi = weather.get("temp_max", weather["temp"])
+        if lo is None:
+            lo = weather.get("temp_min", weather["temp"])
         w, h = screen.get_size()
         font = pygame.font.Font(None, max(22, w // 50))
         temp_s = font.render(f"{weather['temp']}°", True, (255, 255, 255))
-        high_s = font.render(f"H {weather.get('temp_max', weather['temp'])}°", True, (210, 220, 235))
+        high_s = font.render(f"H{hi}°  L{lo}°", True, (210, 220, 235))
 
         pad, gap = 9, 9
         icon_r = max(7, font.get_height() // 3)
