@@ -154,7 +154,10 @@ def _check_flashbacks(state, config, portrait_files, landscape_files, screens):
         except Exception as e:
             log_error(f"Flashback scan failed: {e}")
             fb = []
-        for path, year in sorted(fb, key=lambda x: -x[1])[:20]:
+        # Shuffle so the flashback order varies year to year (and a random 20
+        # are chosen when more than 20 photos qualify for today).
+        shuffle(fb)
+        for path, year in fb[:20]:
             queue.append((path, f"On this day, {year}"))
 
     if not queue:
