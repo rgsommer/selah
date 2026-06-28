@@ -37,7 +37,7 @@ from modules.moon_phase import show_moon_phase
 from modules.selah_config_gui import show_config_gui
 from modules.sender_manager import show_sender_manager
 from modules.leaderboard import show_leaderboard
-from modules.weather_display import show_weather_if_scheduled, show_status_line
+from modules.weather_display import show_weather_if_scheduled, show_status_line, show_weather_pill
 from modules.voice_control import process_voice_command
 from modules.theme_manager import apply_theme
 from modules.quiz_mode import start_quiz_mode
@@ -541,7 +541,9 @@ def main():
                 try:
                     downloaded, uploaded = sync_drive(config, screens)
                     if downloaded:
-                        show_toast_if_needed(screens, config, f"Synced {downloaded} new photo(s) from Google Drive")
+                        # No toast for Drive syncs — only approved-sender email
+                        # submissions pop a "New photo" toast.
+                        print(f"[Selah] Drive sync: {downloaded} new photo(s)")
                 except Exception as e:
                     log_error(f"Drive sync failed: {e}", config=config)
                 last_drive_sync = current_ts
@@ -651,6 +653,10 @@ def main():
             # Drawn last so it sits on top of the freshly rendered photo.
             if config.get("status_line_enabled", False):
                 show_status_line(screens, config)
+
+            # ---- WEATHER PILL (always-on corner) ----
+            if config.get("weather_pill_enabled", False):
+                show_weather_pill(screens, config)
 
             # ---- PHONE-UPLOAD QR (periodic corner overlay) ----
             if config.get("upload_qr_enabled", False):

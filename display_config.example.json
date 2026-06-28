@@ -71,6 +71,8 @@
   "weather_api_key": "",
   "status_line_enabled": false,
   "status_line_position": "top",
+  "weather_pill_enabled": true,
+  "weather_pill_position": "top-right",
   "location": "Hamilton,ON",
   "weather_time": "08:00",
   "weather_times": ["08:00"],

@@ -77,6 +77,8 @@ DEFAULT_CONFIG = {
     "weather_api_key": "",
     "status_line_enabled": False,
     "status_line_position": "top",
+    "weather_pill_enabled": True,
+    "weather_pill_position": "top-right",
     "location": "Hamilton,ON",
     "voice_control_enabled": False,
     "web_control_enabled": False,

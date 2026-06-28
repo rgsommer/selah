@@ -70,10 +70,17 @@ def show_weather_if_scheduled(screens, config):
             _shown_slots.add(slot)        # missed the window (late start) — skip
 
     if time.time() < _show_until:
-        weather = _get_weather(config)
-        if weather:
-            screen = screens.get("landscape") or screens.get("portrait")
-            if screen:
+        screen = screens.get("landscape") or screens.get("portrait")
+        if not screen:
+            return
+        # The scheduled showing is the 5-day forecast; fall back to the current
+        # conditions card if the forecast isn't available.
+        forecast = _get_forecast(config)
+        if forecast:
+            _render_forecast(screen, forecast, config)
+        else:
+            weather = _get_weather(config)
+            if weather:
                 _render_weather(screen, weather, config)
 
 
@@ -191,6 +198,165 @@ def _fetch_openweathermap(api_key, location):
     except Exception as e:
         log_error(f"Weather fetch failed: {e}")
     return None
+
+
+# --- 5-day forecast --------------------------------------------------------
+_cached_forecast = None
+_last_forecast_check = None
+
+
+def _get_forecast(config):
+    """Daily 5-day forecast (list of {day, hi, lo, desc, main}); cached 1h."""
+    global _cached_forecast, _last_forecast_check
+    if not config.get("weather_enabled", False):
+        return None
+    api_key = config.get("weather_api_key", "")
+    if not api_key or api_key == "your_openweathermap_api_key":
+        return _cached_forecast
+    now = datetime.datetime.now()
+    if _last_forecast_check and (now - _last_forecast_check).seconds < 3600:
+        return _cached_forecast
+
+    fc = _fetch_forecast(api_key, config.get("location", "Hamilton,ON"))
+    if fc:
+        _cached_forecast = fc
+        _last_forecast_check = now
+        try:
+            with open("forecast_cache.json", "w") as f:
+                json.dump(fc, f)
+        except Exception:
+            pass
+    elif not _cached_forecast:
+        try:
+            with open("forecast_cache.json") as f:
+                _cached_forecast = json.load(f)
+        except Exception:
+            pass
+    return _cached_forecast
+
+
+def _fetch_forecast(api_key, location):
+    """OpenWeather 5-day/3-hour forecast aggregated to daily hi/lo/condition."""
+    try:
+        import requests
+        url = "https://api.openweathermap.org/data/2.5/forecast"
+        params = {"q": location, "appid": api_key, "units": "metric"}
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code != 200:
+            log_error(f"Forecast API returned {r.status_code}")
+            return None
+        days = {}
+        for entry in r.json().get("list", []):
+            dt = datetime.datetime.fromtimestamp(entry["dt"])
+            key = dt.date().isoformat()
+            t = entry["main"]["temp"]
+            main = entry["weather"][0]["main"]
+            desc = entry["weather"][0]["description"].title()
+            rec = days.setdefault(key, {"hi": t, "lo": t, "conds": {}, "noon": None})
+            rec["hi"] = max(rec["hi"], t)
+            rec["lo"] = min(rec["lo"], t)
+            rec["conds"][main] = rec["conds"].get(main, 0) + 1
+            if 11 <= dt.hour <= 15:
+                rec["noon"] = desc
+        out = []
+        for key in sorted(days)[:5]:
+            rec = days[key]
+            main = max(rec["conds"], key=rec["conds"].get) if rec["conds"] else ""
+            out.append({
+                "day": datetime.date.fromisoformat(key).strftime("%a"),
+                "hi": round(rec["hi"]), "lo": round(rec["lo"]),
+                "desc": rec["noon"] or main, "main": main,
+            })
+        return out
+    except Exception as e:
+        log_error(f"Forecast fetch failed: {e}")
+        return None
+
+
+def _render_forecast(screen, forecast, config):
+    """Render the 5-day forecast as a centered panel."""
+    try:
+        w, h = screen.get_size()
+        n = len(forecast)
+        if not n:
+            return
+        panel_w = min(w - 40, max(480, n * 150))
+        panel_h = max(170, h // 4)
+        px, py = (w - panel_w) // 2, (h - panel_h) // 2
+
+        bg = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        bg.fill((8, 16, 40, 205))
+        screen.blit(bg, (px, py))
+
+        title_font = pygame.font.Font(None, max(28, w // 32))
+        day_font = pygame.font.Font(None, max(24, w // 44))
+        small = pygame.font.Font(None, max(20, w // 56))
+        screen.blit(title_font.render("5-Day Forecast", True, (120, 200, 255)),
+                    (px + 16, py + 12))
+
+        col_w = panel_w // n
+        top = py + 18 + title_font.get_linesize()
+        line = small.get_linesize() + 4
+        for i, d in enumerate(forecast):
+            cx = px + i * col_w + col_w // 2
+            day_s = day_font.render(d["day"], True, (255, 255, 255))
+            screen.blit(day_s, day_s.get_rect(center=(cx, top)))
+            hilo = small.render(f"{d['hi']}° / {d['lo']}°", True, (225, 225, 225))
+            screen.blit(hilo, hilo.get_rect(center=(cx, top + day_font.get_linesize() + 6)))
+            cond = small.render(_short(d.get("desc", "")), True, (180, 195, 220))
+            screen.blit(cond, cond.get_rect(center=(cx, top + day_font.get_linesize() + 6 + line)))
+        try:
+            pygame.display.flip()
+        except Exception:
+            pass
+    except Exception as e:
+        log_error(f"Forecast render failed: {e}")
+
+
+def _short(text, n=14):
+    text = str(text)
+    return text if len(text) <= n else text[:n - 1] + "…"
+
+
+# --- Persistent corner pill (current conditions) ---------------------------
+def show_weather_pill(screens, config):
+    """A small always-on pill in a corner: current temp + condition."""
+    if not config.get("weather_pill_enabled", False):
+        return
+    weather = _get_weather(config)
+    if not weather:
+        return
+    text = f"{weather['temp']}°C  {weather.get('description', '')}".strip()
+    pos = config.get("weather_pill_position", "top-right")
+    for screen in screens.values():
+        _render_pill(screen, text, pos)
+
+
+def _render_pill(screen, text, pos):
+    try:
+        w, h = screen.get_size()
+        font = pygame.font.Font(None, max(20, w // 55))
+        surf = font.render(text, True, (255, 255, 255))
+        pad, margin = 8, 14
+        pw, ph = surf.get_width() + pad * 2, surf.get_height() + pad * 2
+        if pos == "top-left":
+            x, y = margin, margin
+        elif pos == "bottom-left":
+            x, y = margin, h - ph - margin
+        elif pos == "bottom-right":
+            x, y = w - pw - margin, h - ph - margin
+        else:
+            x, y = w - pw - margin, margin
+        bg = pygame.Surface((pw, ph), pygame.SRCALPHA)
+        bg.fill((0, 0, 0, 165))
+        screen.blit(bg, (x, y))
+        screen.blit(surf, (x + pad, y + pad))
+        try:
+            pygame.display.flip()
+        except Exception:
+            pass
+    except Exception as e:
+        log_error(f"Weather pill render failed: {e}")
 
 
 def _render_weather(screen, weather, config):
