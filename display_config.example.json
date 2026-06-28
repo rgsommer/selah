@@ -41,6 +41,8 @@
   "google_calendar_id": "primary",
   "moon_phase_enabled": true,
   "night_screen_off": false,
+  "software_portrait_screen": "none",
+  "software_rotate_dir": "right",
   "enable_face_recognition": true,
   "verse_display_enabled": true,
   "calendar_display_enabled": true,

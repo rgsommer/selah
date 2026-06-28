@@ -65,7 +65,7 @@ def _detect_monitors():
     return monitors
 
 
-def init_displays():
+def init_displays(config=None):
     """Initialize pygame displays. Returns dict like {'landscape': surface, 'portrait': surface}.
 
     ALWAYS returns at least one screen if any display is available.
@@ -73,6 +73,7 @@ def init_displays():
     Never raises.
     """
     global _known_monitor_count
+    config = config or {}
     screens = {}
 
     try:
@@ -84,7 +85,7 @@ def init_displays():
 
         if len(monitors) >= 2:
             print(f"[Selah] {len(monitors)} HDMI displays detected — using dual-screen mode")
-            screens = _init_dual_displays(monitors)
+            screens = _init_dual_displays(monitors, config)
         elif len(monitors) == 1:
             print("[Selah] Single HDMI display detected at startup — using it alone")
         else:
@@ -111,40 +112,95 @@ def init_displays():
         return {}
 
 
-def _init_dual_displays(monitors):
+def _init_dual_displays(monitors, config=None):
     """One borderless window spanning all monitors; each monitor is a subsurface.
 
     This uses the single display surface created by set_mode(), so the normal
-    pygame.display.flip() in the render code updates EVERY screen. (The old
-    SDL2 multi-window approach created separate windows that flip() never
-    refreshed — they stayed black.)
+    pygame.display.flip() in the render code updates EVERY screen.
+
+    Software rotation: a physically portrait-mounted monitor (which X still
+    reports as landscape) can be handled here. We hand the app an upright
+    *portrait* logical surface; a flip() hook rotates it onto the real
+    (landscape) region. Set software_portrait_screen = "left"/"right" and
+    software_rotate_dir = "right"/"left".
     """
+    config = config or {}
     screens = {}
     try:
         total_w = max(m["x"] + m["w"] for m in monitors)
         total_h = max(m["y"] + m["h"] for m in monitors)
 
-        # Place the window at the top-left of the combined desktop so it spans
-        # all heads. NOFRAME = borderless, no fullscreen mode-switch surprises.
         os.environ.setdefault("SDL_VIDEO_WINDOW_POS", "0,0")
         screen = pygame.display.set_mode((total_w, total_h), pygame.NOFRAME)
         pygame.display.set_caption("Selah Display")
 
-        # Left-to-right so the first physical screen is the primary one.
-        for mon in sorted(monitors, key=lambda m: (m["x"], m["y"])):
-            orientation = "portrait" if mon["h"] > mon["w"] else "landscape"
-            if orientation in screens:
-                orientation = f"{orientation}_2"
+        ordered = sorted(monitors, key=lambda m: (m["x"], m["y"]))
+
+        # Which physical screen (if any) is mounted portrait?
+        which = (config.get("software_portrait_screen") or "none").lower()
+        rotate_dir = (config.get("software_rotate_dir") or "right").lower()
+        angle = -90 if rotate_dir == "right" else 90  # pygame rotate is CCW-positive
+        target = None
+        if which == "right":
+            target = ordered[-1]
+        elif which == "left":
+            target = ordered[0]
+
+        global _rotations
+        _rotations = []
+
+        for mon in ordered:
             try:
-                screens[orientation] = screen.subsurface(
-                    (mon["x"], mon["y"], mon["w"], mon["h"]))
+                phys = screen.subsurface((mon["x"], mon["y"], mon["w"], mon["h"]))
             except ValueError as e:
                 log_error(f"Subsurface for {mon.get('name')} out of range: {e}")
+                continue
+
+            if target is not None and mon is target:
+                # Upright portrait surface (swap dims); rotated onto phys on flip.
+                logical = pygame.Surface((mon["h"], mon["w"]))
+                screens["portrait"] = logical
+                _rotations.append((logical, phys, angle))
+                print(f"[Selah] Software-rotating {mon.get('name')} "
+                      f"{'90 right' if angle == -90 else '90 left'} (portrait)")
+            else:
+                orientation = "portrait" if mon["h"] > mon["w"] else "landscape"
+                if orientation in screens:
+                    orientation = f"{orientation}_2"
+                screens[orientation] = phys
+
+        _install_flip_hook()
         return screens
 
     except Exception as e:
         log_error(f"Dual display init failed: {e}")
         return {}
+
+
+# --- Software-rotation flip hook -------------------------------------------
+_rotations = []          # list of (logical_surface, physical_subsurface, angle)
+_flip_hooked = False
+_orig_flip = None
+
+
+def _install_flip_hook():
+    """Patch pygame.display.flip so every flip rotates logical surfaces onto
+    their physical regions. No-op when nothing needs rotating."""
+    global _flip_hooked, _orig_flip
+    if _flip_hooked or not _rotations:
+        return
+    _orig_flip = pygame.display.flip
+
+    def _hooked_flip(*args, **kwargs):
+        try:
+            for logical, phys, angle in _rotations:
+                phys.blit(pygame.transform.rotate(logical, angle), (0, 0))
+        except Exception:
+            pass
+        _orig_flip(*args, **kwargs)
+
+    pygame.display.flip = _hooked_flip
+    _flip_hooked = True
 
 
 def _init_single_display():
@@ -208,7 +264,7 @@ def check_for_display_changes(screens, config):
             except Exception:
                 pass
 
-            new_screens = init_displays()
+            new_screens = init_displays(config)
             if new_screens:
                 return new_screens
             else:

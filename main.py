@@ -252,7 +252,7 @@ def main():
     apply_timezone(config)
 
     # Initialize displays
-    screens = init_displays()
+    screens = init_displays(config)
     if not screens:
         log_error("No displays initialized. Exiting.", critical=True, config=config)
         print("[Selah] ERROR: No displays could be initialized.")

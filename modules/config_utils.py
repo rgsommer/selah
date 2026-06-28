@@ -50,6 +50,8 @@ DEFAULT_CONFIG = {
     "google_calendar_id": "primary",
     "moon_phase_enabled": True,
     "night_screen_off": False,
+    "software_portrait_screen": "none",
+    "software_rotate_dir": "right",
     "enable_face_recognition": False,
     "verse_display_enabled": False,
     "calendar_display_enabled": False,
