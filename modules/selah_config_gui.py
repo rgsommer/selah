@@ -341,6 +341,7 @@ def show_config_gui(screen, config):
             # --- Photo sources ---
             ("cloud_backup_enabled", "Google Drive Sync", "bool"),
             ("google_drive_folder_ids", "Drive Folders", "drivelist"),
+            ("drive_push_enabled", "  Upload Local -> Drive (backup)", "bool"),
             ("family_folder_enabled", "Family/Friends Folder", "bool"),
             ("family_folder_id", "  Family Folder ID/Link", "str"),
             ("family_folder_recurring", "  Greetings Repeat Yearly", "bool"),

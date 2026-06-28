@@ -523,9 +523,12 @@ def sync_drive(config, screens=None):
     family_new = pull_family_folder(config)
     if family_new:
         new_files = list(new_files) + family_new
-    # Cap uploads per cycle so a huge first-time backup is spread over many
-    # cycles instead of freezing the slideshow. sync_now.py uploads unlimited.
-    uploaded_count = push_to_drive(config, max_uploads=config.get("drive_upload_batch", 200))
+    # Push (back up local -> Drive) only when explicitly enabled, so we never
+    # surprise-upload a large archive. Capped per cycle so it never freezes the
+    # slideshow; sync_now.py push uploads unlimited.
+    uploaded_count = 0
+    if config.get("drive_push_enabled", False):
+        uploaded_count = push_to_drive(config, max_uploads=config.get("drive_upload_batch", 200))
     return len(new_files), uploaded_count
 
 

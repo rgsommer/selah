@@ -1,50 +1,53 @@
 #!/usr/bin/env python3
-"""One-shot full two-way Google Drive sync (no per-cycle cap).
+"""One-shot Google Drive sync.
 
-Run this on the Pi to seed/mirror the whole library in one go:
+    python3 sync_now.py          # pull from Drive (+ push only if enabled)
+    python3 sync_now.py push     # force the full local -> Drive upload
 
-    python3 sync_now.py
-
-The live display loop also syncs continuously, but it caps uploads per cycle so
-it never freezes the slideshow — that's slow for a first-time backup of a big
-library. This script does the full push/pull at once with progress output.
-
-Requires the Google libraries, credentials.json, and a valid token.json (run
-the display once to authorize, or authorize here on first run).
+By default this PULLS (downloads new Drive/family-folder photos) and only
+pushes the local library up if drive_push_enabled is true — so it never
+surprise-uploads a big archive into your shared folder. The first run also
+opens a browser to authorize Google.
 """
 
 import os
+import sys
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 from modules.config_utils import load_config
-from modules.google_drive_sync import pull_from_drive, push_to_drive, _get_folder_ids
+from modules.google_drive_sync import (
+    pull_from_drive, pull_family_folder, push_to_drive, _get_folder_ids,
+)
 
 
 def main():
     cfg = load_config("display_config.json")
-
     if not cfg.get("cloud_backup_enabled"):
         print("cloud_backup_enabled is false in display_config.json — enable it first.")
         return
 
+    force_push = "push" in sys.argv[1:]
     sources = _get_folder_ids(cfg)
     backup = cfg.get("google_drive_backup_folder_id", "") or (sources[0] if sources else "")
     print(f"Pull source folder(s): {sources or '(none configured)'}")
-    print(f"Push/backup target   : {backup or '(none configured)'}")
-    if not sources and not backup:
-        print("No Drive folders configured — set google_drive_folder_ids first.")
-        return
 
     print("\nPulling new photos from Drive -> local ...")
     downloaded = pull_from_drive(cfg)
+    downloaded += pull_family_folder(cfg) or []
     print(f"  downloaded {len(downloaded)} new file(s)")
 
-    print("\nPushing local library -> Drive (this can take a long time for big libraries) ...")
-    uploaded = push_to_drive(cfg, max_uploads=None)  # unlimited
-    print(f"  uploaded {uploaded} new file(s)")
+    if force_push or cfg.get("drive_push_enabled", False):
+        print(f"\nPushing local library -> Drive folder {backup or '(none)'} ...")
+        print("  (this can take a long time for a large library)")
+        uploaded = push_to_drive(cfg, max_uploads=None)
+        print(f"  uploaded {uploaded} new file(s)")
+    else:
+        print("\nPush skipped (drive_push_enabled is off) — your local library was")
+        print("not uploaded. To back it up to Drive, set a backup folder and run:")
+        print("    python3 sync_now.py push")
 
-    print("\nDone. The display loop will keep both sides in sync from here on.")
+    print("\nDone.")
 
 
 if __name__ == "__main__":
