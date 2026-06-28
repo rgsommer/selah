@@ -277,8 +277,11 @@ def main():
             portrait_files = prioritize_images(portrait_files, config)
             landscape_files = prioritize_images(landscape_files, config)
 
-        shuffle(portrait_files)
-        shuffle(landscape_files)
+        # Keep image_loader's folder-balanced order (each subfolder gets equal
+        # airtime) unless the user wants a purely-random shuffle instead.
+        if not config.get("balanced_rotation", True):
+            shuffle(portrait_files)
+            shuffle(landscape_files)
 
         # Bias toward the birthday/anniversary person's photos if today is theirs.
         portrait_files = prioritize_for_today(portrait_files, config)
@@ -462,7 +465,8 @@ def main():
                         # Preserve current position if possible
                         current_p = portrait_files[state["portrait"]["index"]] if portrait_files and state["portrait"]["index"] < len(portrait_files) else None
                         portrait_files = new_portrait
-                        shuffle(portrait_files)
+                        if not config.get("balanced_rotation", True):
+                            shuffle(portrait_files)
                         portrait_files = prioritize_for_today(portrait_files, config)
                         portrait_files = prioritize_favorites(portrait_files, config)
                         if current_p and current_p in portrait_files:
@@ -472,7 +476,8 @@ def main():
                     if new_landscape:
                         current_l = landscape_files[state["landscape"]["index"]] if landscape_files and state["landscape"]["index"] < len(landscape_files) else None
                         landscape_files = new_landscape
-                        shuffle(landscape_files)
+                        if not config.get("balanced_rotation", True):
+                            shuffle(landscape_files)
                         landscape_files = prioritize_for_today(landscape_files, config)
                         landscape_files = prioritize_favorites(landscape_files, config)
                         if current_l and current_l in landscape_files:

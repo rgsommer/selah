@@ -17,6 +17,7 @@
   "photo_effect_bw": true,
   "recent_memory_enabled": true,
   "recent_memory": 0,
+  "balanced_rotation": true,
   "on_this_day_enabled": true,
   "upload_qr_enabled": false,
   "upload_qr_interval_minutes": 30,
