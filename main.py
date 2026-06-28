@@ -37,7 +37,10 @@ from modules.moon_phase import show_moon_phase
 from modules.selah_config_gui import show_config_gui
 from modules.sender_manager import show_sender_manager
 from modules.leaderboard import show_leaderboard
-from modules.weather_display import show_weather_if_scheduled, show_status_line, show_weather_pill
+from modules.weather_display import (
+    show_weather_if_scheduled, show_status_line, show_weather_pill,
+    draw_status_line, draw_weather_pill,
+)
 from modules.voice_control import process_voice_command
 from modules.theme_manager import apply_theme
 from modules.quiz_mode import start_quiz_mode
@@ -312,11 +315,66 @@ def _render_one_screen(screen_type, screen, portrait_files, landscape_files,
     _render_screen(screen, screen_type, files, state, config, media_log)
 
 
-def _draw_overlays(screens, config):
+def _fade_in_layer(screen, bg, layer, seconds):
+    """Fade `layer` (a per-pixel-alpha surface) up over `bg` across `seconds`."""
+    try:
+        steps = 30
+        delay = max(10, int(seconds * 1000 / steps))
+        for i in range(1, steps + 1):
+            a = int(255 * i / steps)
+            tmp = layer.copy()
+            # Scale the layer's alpha channel by a/255 (works on SRCALPHA surfaces,
+            # where a plain set_alpha is ignored).
+            tmp.fill((255, 255, 255, a), special_flags=pygame.BLEND_RGBA_MULT)
+            screen.blit(bg, (0, 0))
+            screen.blit(tmp, (0, 0))
+            pygame.display.flip()
+            pygame.time.delay(delay)
+        screen.blit(bg, (0, 0))
+        screen.blit(layer, (0, 0))
+        pygame.display.flip()
+    except Exception as e:
+        log_error(f"Overlay fade-in failed: {e}")
+
+
+def _draw_time_weather(screens, config, fade):
+    """Draw the persistent time / weather-pill overlays, fading them in gently
+    after a fresh photo (fade=True) or drawing them instantly (fade=False)."""
+    status_on = config.get("status_line_enabled", False)
+    pill_on = config.get("weather_pill_enabled", False)
+    if not (status_on or pill_on):
+        return
+    do_fade = fade and config.get("overlay_fade_in_enabled", True)
+    seconds = float(config.get("overlay_fade_seconds", 2.5))
+    for screen in screens.values():
+        if do_fade:
+            bg = screen.copy()
+            layer = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+            drew = False
+            if status_on:
+                drew = draw_status_line(screen, config, layer) or drew
+            if pill_on:
+                drew = draw_weather_pill(screen, config, layer) or drew
+            if drew:
+                _fade_in_layer(screen, bg, layer, seconds)
+        else:
+            if status_on:
+                draw_status_line(screen, config, screen)
+            if pill_on:
+                draw_weather_pill(screen, config, screen)
+    if not do_fade:
+        try:
+            pygame.display.flip()
+        except Exception:
+            pass
+
+
+def _draw_overlays(screens, config, fade=False):
     """Draw every overlay on top of the freshly rendered photo(s).
 
     Must run AFTER the slideshow render — otherwise the photo covers them.
     Pass a subset of screens (staggered mode) to draw on just those.
+    fade=True gently fades the time/weather overlays in after a new photo.
     """
     try:
         show_toast_if_needed(screens, config)
@@ -326,10 +384,7 @@ def _draw_overlays(screens, config):
             show_calendar_if_scheduled(screens, config)
         if config.get("weather_enabled", False):
             show_weather_if_scheduled(screens, config)
-        if config.get("status_line_enabled", False):
-            show_status_line(screens, config)
-        if config.get("weather_pill_enabled", False):
-            show_weather_pill(screens, config)
+        _draw_time_weather(screens, config, fade)
         if config.get("upload_qr_enabled", False):
             show_upload_qr_if_scheduled(screens, config)
         if config.get("coming_up_enabled", False):
@@ -667,12 +722,12 @@ def main():
                 t0, s0 = photo_screens[0]
                 _render_one_screen(t0, s0, portrait_files, landscape_files,
                                    state, config, media_log, is_single, current_ts)
-                _draw_overlays({t0: s0}, config)
+                _draw_overlays({t0: s0}, config, fade=True)
                 time.sleep(max(0.5, rotate_interval / 2.0))
                 for t, s in photo_screens[1:]:
                     _render_one_screen(t, s, portrait_files, landscape_files,
                                        state, config, media_log, is_single, current_ts)
-                _draw_overlays(dict(photo_screens[1:]), config)
+                _draw_overlays(dict(photo_screens[1:]), config, fade=True)
                 time.sleep(max(0.5, rotate_interval / 2.0))
                 continue
 
@@ -681,7 +736,7 @@ def main():
                     _render_one_screen(t, s, portrait_files, landscape_files,
                                        state, config, media_log, is_single, current_ts)
 
-            _draw_overlays(screens, config)
+            _draw_overlays(screens, config, fade=active)
             time.sleep(rotate_interval)
 
     except KeyboardInterrupt:

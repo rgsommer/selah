@@ -84,15 +84,8 @@ def show_weather_if_scheduled(screens, config):
                 _render_weather(screen, weather, config)
 
 
-def show_status_line(screens, config):
-    """Draw a one-line glance bar: time + current temp + today's forecast.
-
-    e.g.  "3:42 PM    14°C    Today 25°C  Clear Sky"
-
-    Time always shows; temp/forecast appear when weather data is available
-    (cached from the same OpenWeatherMap fetch the weather card uses). Position
-    is "top" or "bottom" per config.
-    """
+def _status_text(config):
+    """Build the glance-bar string: time, optionally temp + today's forecast."""
     now = datetime.datetime.now()
     try:
         time_str = now.strftime("%-I:%M %p")  # 3:42 PM (Linux/macOS)
@@ -112,17 +105,35 @@ def show_status_line(screens, config):
                 parts.append(f"Today {hi}°C  {cond}".strip())
             elif cond:
                 parts.append(cond)
+    return "    ".join(parts)
 
-    text = "    ".join(parts)
+
+def show_status_line(screens, config):
+    """Draw the one-line glance bar straight to the screen(s) and flip."""
+    text = _status_text(config)
     position = config.get("status_line_position", "top")
     for screen in screens.values():
         _render_status_line(screen, text, position)
+    try:
+        pygame.display.flip()
+    except Exception:
+        pass
 
 
-def _render_status_line(screen, text, position):
+def draw_status_line(screen, config, target):
+    """Render the glance bar onto `target` (e.g. a fade layer); no flip.
+
+    Returns True if anything was drawn. `screen` is used only for sizing.
+    """
+    _render_status_line(target, _status_text(config),
+                        config.get("status_line_position", "top"))
+    return True
+
+
+def _render_status_line(target, text, position):
     """Render the glance bar as a thin translucent strip at top or bottom."""
     try:
-        w, h = screen.get_size()
+        w, h = target.get_size()
         font_size = max(20, w // 50)
         font = pygame.font.Font(None, font_size)
         surf = font.render(text, True, (255, 255, 255))
@@ -131,12 +142,8 @@ def _render_status_line(screen, text, position):
 
         bg = pygame.Surface((w, bar_h), pygame.SRCALPHA)
         bg.fill((0, 0, 0, 150))
-        screen.blit(bg, (0, by))
-        screen.blit(surf, (14, by + 6))
-        try:
-            pygame.display.flip()
-        except Exception:
-            pass
+        target.blit(bg, (0, by))
+        target.blit(surf, (14, by + 6))
     except Exception as e:
         log_error(f"Status line render failed: {e}")
 
@@ -324,13 +331,13 @@ def _short(text, n=14):
 
 
 # --- Persistent corner pill (current conditions) ---------------------------
-def show_weather_pill(screens, config):
-    """A small always-on pill in a corner: current temp + icon + today's high."""
+def _pill_data(config):
+    """Return (weather, hi, lo, pos) for the corner pill, or None if no data."""
     if not config.get("weather_pill_enabled", False):
-        return
+        return None
     weather = _get_weather(config)
     if not weather:
-        return
+        return None
     # Prefer today's High/Low from the 5-day forecast (the current-conditions
     # endpoint reports min≈max≈now, so it can't give a real daily range).
     hi = weather.get("temp_max", weather["temp"])
@@ -340,9 +347,34 @@ def show_weather_pill(screens, config):
         today = datetime.datetime.now().strftime("%a")
         td = next((d for d in forecast if d.get("day") == today), forecast[0])
         hi, lo = td.get("hi", hi), td.get("lo", lo)
-    pos = config.get("weather_pill_position", "top-right")
+    return weather, hi, lo, config.get("weather_pill_position", "top-right")
+
+
+def show_weather_pill(screens, config):
+    """A small always-on pill in a corner: current temp + icon + today's High/Low."""
+    data = _pill_data(config)
+    if not data:
+        return
+    weather, hi, lo, pos = data
     for screen in screens.values():
         _render_pill(screen, weather, pos, hi, lo)
+    try:
+        pygame.display.flip()
+    except Exception:
+        pass
+
+
+def draw_weather_pill(screen, config, target):
+    """Render the pill onto `target` (e.g. a fade layer); no flip.
+
+    Returns True if drawn. `screen` is used only for sizing.
+    """
+    data = _pill_data(config)
+    if not data:
+        return False
+    weather, hi, lo, pos = data
+    _render_pill(target, weather, pos, hi, lo)
+    return True
 
 
 def _cloud(surf, cx, cy, r, color):
@@ -387,13 +419,13 @@ def _draw_weather_icon(surf, cx, cy, r, main):
         pass
 
 
-def _render_pill(screen, weather, pos, hi=None, lo=None):
+def _render_pill(target, weather, pos, hi=None, lo=None):
     try:
         if hi is None:
             hi = weather.get("temp_max", weather["temp"])
         if lo is None:
             lo = weather.get("temp_min", weather["temp"])
-        w, h = screen.get_size()
+        w, h = target.get_size()
         font = pygame.font.Font(None, max(22, w // 50))
         temp_s = font.render(f"{weather['temp']}°", True, (255, 255, 255))
         high_s = font.render(f"H{hi}°  L{lo}°", True, (210, 220, 235))
@@ -416,19 +448,15 @@ def _render_pill(screen, weather, pos, hi=None, lo=None):
 
         bg = pygame.Surface((pw, ph), pygame.SRCALPHA)
         bg.fill((0, 0, 0, 170))
-        screen.blit(bg, (x, y))
+        target.blit(bg, (x, y))
 
         cy = y + ph // 2
         cx = x + pad
-        screen.blit(temp_s, (cx, cy - temp_s.get_height() // 2))
+        target.blit(temp_s, (cx, cy - temp_s.get_height() // 2))
         cx += temp_s.get_width() + gap + icon_w // 2
-        _draw_weather_icon(screen, cx, cy, icon_r, weather.get("main", ""))
+        _draw_weather_icon(target, cx, cy, icon_r, weather.get("main", ""))
         cx += icon_w // 2 + gap
-        screen.blit(high_s, (cx, cy - high_s.get_height() // 2))
-        try:
-            pygame.display.flip()
-        except Exception:
-            pass
+        target.blit(high_s, (cx, cy - high_s.get_height() // 2))
     except Exception as e:
         log_error(f"Weather pill render failed: {e}")
 
