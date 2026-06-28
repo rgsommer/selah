@@ -520,7 +520,7 @@ def sync_drive(config, screens=None):
     """
     new_files = pull_from_drive(config, screens)
     # Family/Friends folder (separate source; dated files get scheduled).
-    family_new = pull_family_folder(config)
+    family_new = pull_family_folder(config) or []
     if family_new:
         new_files = list(new_files) + family_new
     # Push (back up local -> Drive) only when explicitly enabled, so we never
@@ -529,7 +529,9 @@ def sync_drive(config, screens=None):
     uploaded_count = 0
     if config.get("drive_push_enabled", False):
         uploaded_count = push_to_drive(config, max_uploads=config.get("drive_upload_batch", 200))
-    return len(new_files), uploaded_count
+    # 3rd value = additions to the shared Family/Friends folder (the "someone
+    # uploaded" signal), kept separate from the personal-folder bulk sync.
+    return len(new_files), uploaded_count, len(family_new)
 
 
 # ---------------------------------------------------------------------------

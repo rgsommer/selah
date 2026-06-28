@@ -399,7 +399,7 @@ def _draw_overlay(screen, file_path, config, file_date=None, caption=None):
 # Layout variety — full single / tile-3 / tile-6 with crossfade transitions
 # ---------------------------------------------------------------------------
 
-_LAYOUT_COUNTS = {"single": 1, "split": 2, "tile3": 3, "tile6": 6}
+_LAYOUT_COUNTS = {"single": 1, "split": 2, "cascade": 3, "tile3": 3, "tile6": 6}
 
 
 def layout_file_count(mode):
@@ -566,6 +566,39 @@ def _build_split_frame(screen, paths, config):
     return frame
 
 
+def _build_cascade_frame(screen, paths, config):
+    """3 photos cascading diagonally top-left -> center -> bottom-right, each
+    overlapping a corner of the previous (a stacked-snapshots look)."""
+    w, h = screen.get_size()
+    frame = pygame.Surface((w, h))
+    frame.fill((16, 16, 22))
+    cell_w, cell_h = int(w * 0.52), int(h * 0.52)
+    offsets = [(0.02, 0.02), (0.25, 0.25), (0.46, 0.46)]
+    border = max(4, w // 220)
+    for idx, (ox, oy) in enumerate(offsets):
+        if idx >= len(paths):
+            break
+        try:
+            img = _scaled_image(paths[idx], cell_w, cell_h)
+            if not img:
+                continue
+            img = _maybe_effect(img, config)
+            iw, ih = img.get_size()
+            x = min(int(ox * w), w - iw - border)
+            y = min(int(oy * h), h - ih - border)
+            pygame.draw.rect(frame, (240, 240, 240),
+                             (x - border, y - border, iw + 2 * border, ih + 2 * border))
+            frame.blit(img, (x, y))
+        except Exception as e:
+            log_error(f"Cascade render failed for {paths[idx]}: {e}")
+    try:
+        from modules.theme_manager import draw_theme_border
+        draw_theme_border(frame)
+    except Exception:
+        pass
+    return frame
+
+
 def _present_split(screen, new_frame, animate=True):
     """Transition for split mode: the two old halves slide off opposite ways,
     revealing the new split underneath."""
@@ -624,6 +657,8 @@ def show_layout(screen, image_paths, config, mode, file_meta=None, fade=True):
             frame = _build_split_frame(screen, image_paths, config)
             _present_split(screen, frame, animate=fade and config.get("layout_fade_enabled", True))
             return
+        elif mode == "cascade":
+            frame = _build_cascade_frame(screen, image_paths, config)
         elif mode == "tile3":
             cols, rows = (1, 3) if portrait else (3, 1)
             frame = _build_grid_frame(screen, image_paths, cols, rows, config)

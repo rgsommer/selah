@@ -539,11 +539,15 @@ def main():
             # ---- GOOGLE DRIVE SYNC (throttled) ----
             if config.get("cloud_backup_enabled", False) and current_ts - last_drive_sync > drive_sync_interval:
                 try:
-                    downloaded, uploaded = sync_drive(config, screens)
+                    downloaded, uploaded, family_added = sync_drive(config, screens)
                     if downloaded:
-                        # No toast for Drive syncs — only approved-sender email
-                        # submissions pop a "New photo" toast.
                         print(f"[Selah] Drive sync: {downloaded} new photo(s)")
+                    # One toast per sync that brought new shared-folder uploads —
+                    # the "someone added to the folder" alert, not per-pic and not
+                    # for the personal-folder bulk sync.
+                    if family_added:
+                        show_toast_if_needed(screens, config,
+                                             f"{family_added} new photo(s) shared!")
                 except Exception as e:
                     log_error(f"Drive sync failed: {e}", config=config)
                 last_drive_sync = current_ts

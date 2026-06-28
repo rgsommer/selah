@@ -15,7 +15,7 @@ def _load_contacts():
         return []
 
 # Default weights restored when a layout checkbox is switched back ON.
-LAYOUT_DEFAULT_WEIGHTS = {"single": 50, "split": 20, "tile3": 30, "tile6": 20}
+LAYOUT_DEFAULT_WEIGHTS = {"single": 50, "split": 20, "cascade": 20, "tile3": 30, "tile6": 20}
 
 
 def _layout_is_on(config, mode):
@@ -299,6 +299,7 @@ def show_config_gui(screen, config):
             ("layout_variety_enabled", "Layout Variety", "bool"),
             ("single", "  Layout: Full Single", "layoutbool"),
             ("split", "  Layout: Split (2, slide)", "layoutbool"),
+            ("cascade", "  Layout: Cascade (3, stacked)", "layoutbool"),
             ("tile3", "  Layout: Tile 3", "layoutbool"),
             ("tile6", "  Layout: Tile 6", "layoutbool"),
             ("layout_fade_enabled", "  Fade Transitions", "bool"),
@@ -327,9 +328,11 @@ def show_config_gui(screen, config):
             ("calendar_display_enabled", "Daily Agenda (calendar)", "bool"),
             ("google_calendar_id", "  Calendar ID", "str"),
             ("calendar_start_time", "  Agenda Start (HH:MM)", "str"),
+            ("calendar_times", "  Agenda Times (csv HH:MM)", "csv"),
             ("calendar_duration_minutes", "  Agenda Duration (min, 0=all day)", "int"),
             ("weather_enabled", "Weather Display", "bool"),
             ("weather_time", "  Weather Time (HH:MM)", "str"),
+            ("weather_times", "  Weather Times (csv HH:MM)", "csv"),
             ("status_line_enabled", "Status Line (time+temp+forecast)", "bool"),
             ("status_line_position", "  Status Line Position (top/bottom)", "str"),
             ("special_days_enabled", "Special Days", "bool"),
@@ -428,6 +431,9 @@ def show_config_gui(screen, config):
                 elif ftype == "contacts":
                     val_str = f"{len(_load_contacts())} people  [Enter]"
                     color = (255, 255, 255)
+                elif ftype == "csv":
+                    val_str = ", ".join(str(x) for x in (config.get(key) or [])) or "(none)"
+                    color = (255, 255, 255)
                 else:
                     val_str = str(config.get(key, ""))
                     color = (255, 255, 255)
@@ -462,6 +468,8 @@ def show_config_gui(screen, config):
                             try:
                                 if ftype == "int":
                                     config[key] = int(edit_buffer)
+                                elif ftype == "csv":
+                                    config[key] = [x.strip() for x in edit_buffer.split(",") if x.strip()]
                                 else:
                                     config[key] = edit_buffer
                             except ValueError:
@@ -491,7 +499,10 @@ def show_config_gui(screen, config):
                             elif ftype not in ("bool", "layoutbool"):
                                 # Only text/number fields are editable; toggles use Space.
                                 editing = True
-                                edit_buffer = str(config.get(key, ""))
+                                if ftype == "csv":
+                                    edit_buffer = ", ".join(str(x) for x in (config.get(key) or []))
+                                else:
+                                    edit_buffer = str(config.get(key, ""))
                         elif event.key == pygame.K_SPACE:
                             key, _, ftype = editable_fields[selected]
                             if ftype == "bool":
