@@ -18,25 +18,38 @@ def _parse_hhmm(value):
         return None
 
 
-def show_calendar_if_scheduled(screens, config):
-    """Show the daily agenda from Google Calendar.
+def _calendar_times(config):
+    """Scheduled agenda times: calendar_times list, or [calendar_start_time]."""
+    times = config.get("calendar_times")
+    if not times:
+        single = (config.get("calendar_start_time") or "").strip()
+        times = [single] if single else []
+    elif isinstance(times, str):
+        times = [times]
+    return [t for t in (str(x).strip() for x in times) if _parse_hhmm(t) is not None]
 
-    Two modes, chosen by ``calendar_duration_minutes``:
-      * > 0 : the agenda runs as a window starting at ``calendar_start_time``
-              for that many minutes, then stops for the day. (e.g. start 06:00,
-              duration 120 -> agenda shows 06:00-08:00.)
-      * 0   : legacy behavior — a brief agenda twice an hour, all day.
+
+def show_calendar_if_scheduled(screens, config):
+    """Show the agenda at each configured time of day.
+
+    Set calendar_times = ["06:00", "21:00"] for multiple showings (or
+    calendar_start_time for one). Each runs for calendar_duration_minutes
+    (default 3 min if unset). With no times configured it falls back to a
+    brief pass at :15 and :45.
     """
     now = datetime.datetime.now()
-    duration = int(config.get("calendar_duration_minutes", 0) or 0)
+    times = _calendar_times(config)
 
-    if duration > 0:
-        start = _parse_hhmm(config.get("calendar_start_time", "06:00"))
-        if start is None:
-            return
-        start_dt = now.replace(hour=start[0], minute=start[1], second=0, microsecond=0)
-        end_dt = start_dt + datetime.timedelta(minutes=duration)
-        if not (start_dt <= now < end_dt):
+    if times:
+        dur = int(config.get("calendar_duration_minutes", 0) or 0) or 3
+        in_window = False
+        for t in times:
+            hm = _parse_hhmm(t)
+            start = now.replace(hour=hm[0], minute=hm[1], second=0, microsecond=0)
+            if start <= now < start + datetime.timedelta(minutes=dur):
+                in_window = True
+                break
+        if not in_window:
             return
     else:
         # Legacy: a quick pass at :15 and :45.

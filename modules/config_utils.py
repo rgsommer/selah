@@ -46,6 +46,7 @@ DEFAULT_CONFIG = {
     "off_time": "22:00",
     "timezone": "America/Toronto",
     "calendar_start_time": "06:00",
+    "calendar_times": [],
     "calendar_duration_minutes": 0,
     "google_calendar_id": "primary",
     "moon_phase_enabled": True,
@@ -93,6 +94,7 @@ DEFAULT_CONFIG = {
     "error_email_recipient": "",
     # --- Daily weather card ---
     "weather_time": "08:00",
+    "weather_times": [],
     "weather_display_seconds": 60,
     # --- Night light on motion ---
     "night_light_enabled": False,

@@ -9,39 +9,66 @@ from modules.logger import log_error
 _last_weather_check = None
 _cached_weather = None
 
-# Daily-schedule state
-_shown_for_date = None   # ISO date string the morning card was last shown for
+# Schedule state
+_shown_slots = set()     # {(date, "HH:MM")} weather slots already fired today
 _show_until = 0          # epoch seconds: keep rendering the card until this time
 
 
-def show_weather_if_scheduled(screens, config):
-    """Show the daily weather card once per day at the configured time.
+def _times(config):
+    """Scheduled weather times: weather_times list, or [weather_time] fallback."""
+    times = config.get("weather_times")
+    if not times:
+        single = (config.get("weather_time") or "").strip()
+        times = [single] if single else []
+    elif isinstance(times, str):
+        times = [times]
+    out = []
+    for t in times:
+        t = str(t).strip()
+        try:
+            datetime.datetime.strptime(t, "%H:%M")
+            out.append(t)
+        except ValueError:
+            pass
+    return out
 
-    The spec calls for a morning weather update (default 08:00). Once the
-    clock reaches ``weather_time`` we render the card for
-    ``weather_display_seconds`` (default 60s) and then not again until the
-    next day. ``weather_time`` accepts "HH:MM"; set it to whatever hour the
-    family wants their forecast.
+
+def _within(now, hhmm, minutes):
+    try:
+        h, m = hhmm.split(":")
+        start = now.replace(hour=int(h), minute=int(m), second=0, microsecond=0)
+        return start <= now < start + datetime.timedelta(minutes=minutes)
+    except Exception:
+        return False
+
+
+def show_weather_if_scheduled(screens, config):
+    """Show the weather card at each configured time of day.
+
+    Set weather_times = ["08:00", "21:30"] for multiple showings (or
+    weather_time for a single one). Each crossing renders the card for
+    weather_display_seconds. Times missed because the app started later are
+    skipped, not replayed.
     """
-    global _shown_for_date, _show_until
+    global _show_until, _shown_slots
 
     now = datetime.datetime.now()
     today = now.date().isoformat()
-    sched = config.get("weather_time", "08:00")
+    cur = now.strftime("%H:%M")
+    _shown_slots = {s for s in _shown_slots if s[0] == today}  # drop old days
 
-    # Arm the card the first loop on/after the scheduled time each day.
-    if _shown_for_date != today and now.strftime("%H:%M") >= sched:
-        weather = _get_weather(config)
-        if weather:
-            _shown_for_date = today
-            _show_until = time.time() + config.get("weather_display_seconds", 60)
+    for t in _times(config):
+        slot = (today, t)
+        if slot in _shown_slots or cur < t:
+            continue
+        if _within(now, t, 2):           # just crossed this time -> arm the card
+            if _get_weather(config):
+                _show_until = time.time() + config.get("weather_display_seconds", 60)
+                _shown_slots.add(slot)
+            # else: no data yet (e.g. no network) — retry next loop
         else:
-            # No data yet (e.g. no network at boot) — retry next loop, don't
-            # mark today as shown so we still catch it once the API responds.
-            return
+            _shown_slots.add(slot)        # missed the window (late start) — skip
 
-    # While the card is "armed", render it each loop so it stays visible
-    # over the rotating slideshow for the configured window.
     if time.time() < _show_until:
         weather = _get_weather(config)
         if weather:
