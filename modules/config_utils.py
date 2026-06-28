@@ -77,6 +77,7 @@ DEFAULT_CONFIG = {
     "drive_downscale_enabled": True,
     "drive_downscale_max_px": 2560,
     "drive_mirror_structure": True,
+    "drive_pull_dir": "media/drive",
     "family_folder_enabled": False,
     "family_folder_id": "",
     "family_folder_recurring": True,

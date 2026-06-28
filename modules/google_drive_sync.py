@@ -268,11 +268,12 @@ def _pull_one_folder(service, folder_id, config, downloaded, new_files, media_in
                 }
                 continue
 
-            # Determine destination folder
-            dest_dir = Path(config.get("display_dir", "media/display"))
+            # Drive-sourced photos live under their own folder (media/drive).
+            drive_root = Path(config.get("drive_pull_dir", "media/drive"))
+            dest_dir = drive_root
 
-            # Check for subfolder structure in Drive
-            # If the file is inside a date-named subfolder, replicate locally
+            # If the file sits inside a subfolder on Drive, replicate that
+            # subfolder under media/drive so the local tree mirrors Drive.
             try:
                 parents = service.files().get(
                     fileId=file_id, fields="parents"
@@ -282,11 +283,10 @@ def _pull_one_folder(service, folder_id, config, downloaded, new_files, media_in
                         fileId=parents[0], fields="name"
                     ).execute()
                     parent_name = parent_info.get("name", "")
-                    # Check if parent folder looks like a date
-                    if _is_date_folder(parent_name):
-                        dest_dir = Path(config.get("media_folder", "media")) / parent_name
+                    if parent_name:
+                        dest_dir = drive_root / parent_name
             except Exception:
-                pass  # Fall back to display_dir
+                pass  # Fall back to media/drive root
 
             dest_dir.mkdir(parents=True, exist_ok=True)
             dest_path = dest_dir / file_name
@@ -746,11 +746,17 @@ def _guess_mime(file_path):
 
 
 def _collect_all_local_media(config):
-    """Collect all media file paths from local media directories."""
+    """Collect all media file paths from local media directories.
+
+    Skips the Drive-pull folder (those files came FROM Drive — pushing them
+    back would just nest a duplicate folder)."""
     media_folder = config.get("media_folder", "media")
     valid_exts = tuple(config.get("valid_extensions", [".jpg", ".jpeg", ".png", ".mp4", ".avi", ".mov"]))
+    skip_root = os.path.abspath(config.get("drive_pull_dir", "media/drive"))
     files = []
     for path in Path(media_folder).rglob("*"):
         if path.suffix.lower() in valid_exts and path.is_file():
+            if os.path.abspath(str(path)).startswith(skip_root + os.sep):
+                continue
             files.append(str(path))
     return files

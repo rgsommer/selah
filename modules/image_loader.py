@@ -191,6 +191,7 @@ def get_images_and_videos(config):
             collect_files(landscape_dir, landscape_by_folder, orientation="landscape")
             collect_files(art_dir, orientation=None)
             collect_files(display_dir, orientation=None)
+            collect_files(config.get("drive_pull_dir", "media/drive"), orientation=None)
 
             # Collect dated folders (e.g., media/2025-05-10/)
             media_path = Path(media_folder)
