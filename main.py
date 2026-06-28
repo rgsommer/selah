@@ -166,20 +166,71 @@ def _check_flashbacks(state, config, portrait_files, landscape_files, screens):
     show_toast_if_needed(screens, config, "Today's special photos")
 
 
-def _render_screen(screen, screen_type, files, state, config, media_log):
-    """Render the next slideshow frame for one screen, with random layout variety.
+def _render_frame(screen, frame, config, media_log):
+    """Render an already-decided frame: {"mode", "picks", "caption"}."""
+    try:
+        mode, picks = frame["mode"], frame["picks"]
+        cap_override = frame.get("caption")
+        if mode == "single":
+            f = picks[0]
+            if f.lower().endswith(VIDEO_EXTS):
+                fd, cap = _get_media_metadata(f, media_log)
+                show_video(screen, f, config, fd, cap)
+            else:
+                fd, cap = ((None, cap_override) if cap_override is not None
+                           else _get_media_metadata(f, media_log))
+                show_layout(screen, [f], config, "single", file_meta=(fd, cap))
+            _set_now_showing(f)
+        else:
+            show_layout(screen, picks, config, mode)
+            _set_now_showing(picks[0])
+    except Exception as e:
+        log_error(f"Render frame failed: {e}")
 
-    Picks a layout (single / tile3 / tile6) per rotation; videos always play
-    full-screen. Skips recently-shown photos so the same shots don't repeat too
-    soon. Advances the screen's index by the number of files consumed.
+
+def _push_history(state, screen_type, frame):
+    """Record a rendered frame so the arrows can browse back/forward through it."""
+    sd = state.setdefault(screen_type, {"index": 0, "paused_until": 0})
+    hist = sd.setdefault("history", [])
+    hist.append(frame)
+    if len(hist) > 40:
+        del hist[0]
+    sd["hist_pos"] = len(hist) - 1
+
+
+def _nav_history(screen, screen_type, files, state, config, media_log, direction):
+    """Manual browse: replay the previous/next full render, or make a new one."""
+    sd = state.get(screen_type)
+    if sd is None or not files:
+        return
+    hist = sd.get("history", [])
+    pos = sd.get("hist_pos", len(hist) - 1)
+    if direction < 0:
+        if pos > 0:
+            sd["hist_pos"] = pos - 1
+            _render_frame(screen, hist[pos - 1], config, media_log)
+    else:
+        if pos < len(hist) - 1:
+            sd["hist_pos"] = pos + 1
+            _render_frame(screen, hist[pos + 1], config, media_log)
+        else:
+            _render_screen(screen, screen_type, files, state, config, media_log)
+
+
+def _render_screen(screen, screen_type, files, state, config, media_log):
+    """Render the next slideshow frame for one screen, with random layout variety,
+    recording it so the arrows can browse back/forward through full renders.
+
+    Videos always play full-screen; recently-shown photos are skipped.
     """
     # Morning queue (scheduled greetings + on-this-day) plays first, one/frame.
     fbq = state.get("flashback_queue")
     if fbq:
         path, caption = fbq.popleft()
         if os.path.exists(path) and not path.lower().endswith(VIDEO_EXTS):
-            show_layout(screen, [path], config, "single", file_meta=(None, caption))
-            _set_now_showing(path)
+            frame = {"mode": "single", "picks": [path], "caption": caption}
+            _push_history(state, screen_type, frame)
+            _render_frame(screen, frame, config, media_log)
             _mark_shown(state, [path], config, len(files))
             return
 
@@ -198,17 +249,14 @@ def _render_screen(screen, screen_type, files, state, config, media_log):
         mode = "single"  # videos never tile
 
     if mode == "single":
-        file_date, caption = _get_media_metadata(first, media_log)
-        if first.lower().endswith(VIDEO_EXTS):
-            show_video(screen, first, config, file_date, caption)
-        else:
-            show_layout(screen, [first], config, "single", file_meta=(file_date, caption))
-        _set_now_showing(first)
+        frame = {"mode": "single", "picks": [first], "caption": None}
+        _push_history(state, screen_type, frame)
+        _render_frame(screen, frame, config, media_log)
         _mark_shown(state, [first], config, len(files))
         state[screen_type]["index"] = (idx + 1) % len(files)
         return
 
-    # Tile modes: gather N images (skipping videos and recently-shown), from idx.
+    # Tile/split modes: gather N images (skipping videos and recently-shown).
     need = layout_file_count(mode)
     skip_recent = config.get("recent_memory_enabled", True)
     picks, i, scanned = [], idx, 0
@@ -218,8 +266,7 @@ def _render_screen(screen, screen_type, files, state, config, media_log):
             picks.append(f)
         i += 1
         scanned += 1
-    # If recency filtering starved us, retry allowing recent images.
-    if len(picks) < need:
+    if len(picks) < need:  # recency filtering starved us — allow recent images
         picks, i, scanned = [], idx, 0
         while len(picks) < need and scanned < len(files):
             f = files[i % len(files)]
@@ -229,16 +276,16 @@ def _render_screen(screen, screen_type, files, state, config, media_log):
             scanned += 1
 
     if len(picks) < need:
-        # Not enough images for a collage — fall back to a single photo.
         f = picks[0] if picks else first
-        fd, cap = _get_media_metadata(f, media_log)
-        show_layout(screen, [f], config, "single", file_meta=(fd, cap))
-        _set_now_showing(f)
+        frame = {"mode": "single", "picks": [f], "caption": None}
+        _push_history(state, screen_type, frame)
+        _render_frame(screen, frame, config, media_log)
         _mark_shown(state, [f], config, len(files))
         state[screen_type]["index"] = (idx + 1) % len(files)
     else:
-        show_layout(screen, picks, config, mode)
-        _set_now_showing(picks[0])
+        frame = {"mode": mode, "picks": picks, "caption": None}
+        _push_history(state, screen_type, frame)
+        _render_frame(screen, frame, config, media_log)
         _mark_shown(state, picks, config, len(files))
         state[screen_type]["index"] = i % len(files)
 
@@ -396,6 +443,25 @@ def main():
                                                      f"Approved {n} pending sender(s)")
                         except Exception as e:
                             log_error(f"Approve-all failed: {e}")
+                    elif event.key == pygame.K_SPACE:
+                        # Play / pause the slideshow.
+                        state["paused"] = not state.get("paused", False)
+                        show_toast_if_needed(screens, config,
+                                             "Paused" if state["paused"] else "Playing")
+                    elif event.key in (pygame.K_LEFT, pygame.K_UP):
+                        state["nav_request"] = -1   # previous render, both screens
+                    elif event.key in (pygame.K_RIGHT, pygame.K_DOWN):
+                        state["nav_request"] = 1    # next render, both screens
+
+            # ---- MANUAL BROWSE (arrows / swipe) — step full renders on every screen ----
+            _dir = state.pop("nav_request", 0)
+            if _dir:
+                pause_for = config.get("manual_navigation_pause", 60)
+                for _stype, _screen in screens.items():
+                    if _stype.startswith("portrait") or _stype.startswith("landscape"):
+                        _files = portrait_files if _stype.startswith("portrait") else landscape_files
+                        _nav_history(_screen, _stype, _files, state, config, media_log, _dir)
+                        state.setdefault(_stype, {})["paused_until"] = current_ts + pause_for
 
             # ---- NIGHT MODE ----
             if is_display_off(current_time, config):
@@ -543,7 +609,8 @@ def main():
                 process_voice_command(screens, config, state, portrait_files, landscape_files)
 
             # ---- MAIN SLIDESHOW ROTATION ----
-            if state.get("slideshow_active", True) or not config.get("motion_triggered_slideshow", False):
+            if not state.get("paused", False) and (
+                    state.get("slideshow_active", True) or not config.get("motion_triggered_slideshow", False)):
                 photo_screens = [k for k in screens
                                  if k.startswith("portrait") or k.startswith("landscape")]
                 is_single_screen = len(photo_screens) == 1

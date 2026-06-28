@@ -34,44 +34,14 @@ def handle_events(screens, config, portrait_files, landscape_files, state, event
                 if event.key == pygame.K_ESCAPE:
                     pygame.quit()
                     raise SystemExit("ESC pressed - exiting Selah")
+                # Arrow keys + Space are handled in the main loop (they browse
+                # full renders / toggle pause); we leave them for it.
 
-                # Landscape navigation: Left/Right arrows
-                elif event.key == pygame.K_RIGHT:
-                    if landscape_files and "landscape" in state:
-                        state["landscape"]["index"] = (
-                            (state["landscape"]["index"] + 1) % len(landscape_files)
-                        )
-                        state["landscape"]["paused_until"] = time.time() + pause_duration
-                        _show_current(screens, "landscape", landscape_files, state, config)
-
-                elif event.key == pygame.K_LEFT:
-                    if landscape_files and "landscape" in state:
-                        state["landscape"]["index"] = (
-                            (state["landscape"]["index"] - 1) % len(landscape_files)
-                        )
-                        state["landscape"]["paused_until"] = time.time() + pause_duration
-                        _show_current(screens, "landscape", landscape_files, state, config)
-
-                # Portrait navigation: Up/Down arrows
-                elif event.key == pygame.K_DOWN:
-                    if portrait_files and "portrait" in state:
-                        state["portrait"]["index"] = (
-                            (state["portrait"]["index"] + 1) % len(portrait_files)
-                        )
-                        state["portrait"]["paused_until"] = time.time() + pause_duration
-                        _show_current(screens, "portrait", portrait_files, state, config)
-
-                elif event.key == pygame.K_UP:
-                    if portrait_files and "portrait" in state:
-                        state["portrait"]["index"] = (
-                            (state["portrait"]["index"] - 1) % len(portrait_files)
-                        )
-                        state["portrait"]["paused_until"] = time.time() + pause_duration
-                        _show_current(screens, "portrait", portrait_files, state, config)
-
-            # Touchscreen swipe detection
+            # Touchscreen swipe -> request a browse step (main loop renders it).
             elif event.type == pygame.FINGERMOTION:
-                _handle_swipe(event, screens, config, portrait_files, landscape_files, state, pause_duration)
+                if abs(event.dx) > 0.05 or abs(event.dy) > 0.05:
+                    primary = event.dx if abs(event.dx) >= abs(event.dy) else event.dy
+                    state["nav_request"] = 1 if primary > 0 else -1
 
     except SystemExit:
         raise
