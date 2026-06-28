@@ -477,6 +477,42 @@ def ensure_family_subfolders(config):
 # PUSH — Backup local media to Google Drive
 # ---------------------------------------------------------------------------
 
+def _ensure_drive_folder_path(service, root_id, rel_dir, cache):
+    """Return the Drive folder ID for `rel_dir` (e.g. 'display/Birds') beneath
+    root_id, creating subfolders as needed so the upload mirrors the local tree.
+    `cache` maps a relative path -> folder id to avoid repeat lookups."""
+    if not rel_dir or rel_dir in (".", ""):
+        return root_id
+    parent = root_id
+    parts = []
+    for name in rel_dir.replace("\\", "/").split("/"):
+        if not name or name == ".":
+            continue
+        parts.append(name)
+        key = "/".join(parts)
+        if key in cache:
+            parent = cache[key]
+            continue
+        # Find an existing subfolder with this name under `parent`.
+        safe = name.replace("'", "\\'")
+        q = (f"name='{safe}' and '{parent}' in parents and "
+             "mimeType='application/vnd.google-apps.folder' and trashed=false")
+        resp = service.files().list(q=q, spaces="drive",
+                                    fields="files(id)", pageSize=1).execute()
+        found = resp.get("files", [])
+        if found:
+            parent = found[0]["id"]
+        else:
+            created = service.files().create(body={
+                "name": name, "mimeType": "application/vnd.google-apps.folder",
+                "parents": [parent],
+            }, fields="id").execute()
+            parent = created["id"]
+            print(f"[Drive] Created folder: {key}")
+        cache[key] = parent
+    return parent
+
+
 def push_to_drive(config, file_paths=None, max_uploads=None):
     """
     Upload local media files to the configured Google Drive folder.
@@ -512,6 +548,11 @@ def push_to_drive(config, file_paths=None, max_uploads=None):
         file_paths = _collect_all_local_media(config)
 
     valid_exts = tuple(config.get("valid_extensions", [".jpg", ".jpeg", ".png", ".mp4", ".avi", ".mov"]))
+    # Mirror the local folder structure into Drive (default on) so uploads land
+    # in the same subfolders they live in locally.
+    mirror = config.get("drive_mirror_structure", True)
+    media_root = config.get("media_folder", "media")
+    folder_cache = {}
 
     for file_path in file_paths:
         file_path = str(file_path)
@@ -529,9 +570,18 @@ def push_to_drive(config, file_paths=None, max_uploads=None):
             file_name = os.path.basename(file_path)
             mime_type = _guess_mime(file_path)
 
+            parent_id = folder_id
+            if mirror:
+                try:
+                    rel_dir = os.path.dirname(os.path.relpath(file_path, media_root))
+                    parent_id = _ensure_drive_folder_path(service, folder_id, rel_dir, folder_cache)
+                except Exception as e:
+                    log_error(f"Mirror path failed for {file_path}: {e}", config=config)
+                    parent_id = folder_id
+
             file_metadata = {
                 "name": file_name,
-                "parents": [folder_id],
+                "parents": [parent_id],
             }
             media = MediaFileUpload(file_path, mimetype=mime_type, resumable=True)
             result = service.files().create(
