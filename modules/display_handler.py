@@ -506,12 +506,24 @@ def _build_single_frame(screen, image_path, config, file_date, caption):
     return frame
 
 
+def _gutter_px(config, w):
+    """Width of the separating line between photos in multi layouts.
+
+    Defaults to ~0.5 cm on a typical HDMI panel (~width/110). Override with
+    multi_gutter_px in the config for an exact pixel width.
+    """
+    g = config.get("multi_gutter_px", 0)
+    if g and int(g) > 0:
+        return int(g)
+    return max(6, round(w / 110))
+
+
 def _build_grid_frame(screen, paths, cols, rows, config):
     """Render a cols x rows photo collage onto an offscreen frame."""
     w, h = screen.get_size()
     frame = pygame.Surface((w, h))
     frame.fill((0, 0, 0))
-    gap = max(4, w // 200)
+    gap = _gutter_px(config, w)
     cell_w = (w - gap * (cols + 1)) // cols
     cell_h = (h - gap * (rows + 1)) // rows
 
@@ -545,8 +557,9 @@ def _build_split_frame(screen, paths, config):
     w, h = screen.get_size()
     frame = pygame.Surface((w, h))
     frame.fill((0, 0, 0))
-    half = w // 2
-    cells = [(0, 0, half, h), (half, 0, w - half, h)]
+    gap = _gutter_px(config, w)
+    cell_w = (w - gap) // 2
+    cells = [(0, 0, cell_w, h), (cell_w + gap, 0, w - cell_w - gap, h)]
     for idx, (cx, cy, cw, ch) in enumerate(cells):
         if idx >= len(paths):
             break

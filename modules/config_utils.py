@@ -18,6 +18,7 @@ DEFAULT_CONFIG = {
     "layout_fade_enabled": True,
     "transition_style": "random",
     "layout_weights": {"single": 50, "split": 20, "cascade": 20, "tile3": 30, "tile6": 20},
+    "multi_gutter_px": 0,
     "photo_effects_enabled": False,
     "photo_effect_chance": 15,
     "photo_effect_sepia": True,
