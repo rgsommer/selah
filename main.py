@@ -10,7 +10,7 @@ import time
 import json
 import sys
 import os
-from random import shuffle
+from random import shuffle, randrange
 
 # Ensure we're running from the script's directory
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -309,6 +309,14 @@ def main():
         # their own rotation index instead of being skipped.
         for _sk in screens:
             state.setdefault(_sk, {"index": 0, "paused_until": 0})
+
+        # Start each screen at a random spot so the same photos don't open every
+        # launch (each screen also gets a different starting point).
+        for _sk, _sv in state.items():
+            if isinstance(_sv, dict) and "index" in _sv:
+                _n = len(portrait_files) if _sk.startswith("portrait") else len(landscape_files)
+                if _n > 1:
+                    _sv["index"] = randrange(_n)
 
         rotate_interval = config.get("rotate_interval", 10)
         motion_timeout = config.get("motion_timeout", 300)
