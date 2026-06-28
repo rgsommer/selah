@@ -281,7 +281,7 @@ def check_for_display_changes(screens, config):
 def show_image(screen, image_path, config, file_date=None, caption=None):
     """Display an image on the given screen surface with optional metadata overlay."""
     try:
-        image = pygame.image.load(image_path)
+        image = _load_surface(image_path)
         screen_w, screen_h = screen.get_size()
 
         # Scale preserving aspect ratio, then center
@@ -423,9 +423,26 @@ def pick_layout_mode(config):
         return "single"
 
 
+def _load_surface(image_path):
+    """Load an image as a pygame Surface, honoring EXIF orientation.
+
+    pygame.image.load ignores EXIF, so phone/camera photos with a rotation tag
+    show sideways AND mismatch how is_portrait classified them (landing on the
+    wrong screen). Going through PIL's exif_transpose makes display match
+    classification.
+    """
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(image_path) as im:
+            im = ImageOps.exif_transpose(im).convert("RGB")
+            return pygame.image.fromstring(im.tobytes(), im.size, "RGB")
+    except Exception:
+        return pygame.image.load(image_path)
+
+
 def _scaled_image(image_path, max_w, max_h):
     """Load and aspect-scale an image to fit within (max_w, max_h)."""
-    image = pygame.image.load(image_path)
+    image = _load_surface(image_path)
     iw, ih = image.get_size()
     if iw == 0 or ih == 0:
         return None
