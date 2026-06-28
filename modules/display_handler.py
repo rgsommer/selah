@@ -612,7 +612,13 @@ def _build_cascade_frame(screen, paths, config):
     return frame
 
 
-def _present_split(screen, new_frame, animate=True):
+def _stamp(screen, overlay):
+    """Re-blit the persistent band overlay (if any) on top of the current frame."""
+    if overlay is not None:
+        screen.blit(overlay, (0, 0))
+
+
+def _present_split(screen, new_frame, animate=True, overlay=None):
     """Transition for split mode: the two old halves slide off opposite ways,
     revealing the new split underneath."""
     try:
@@ -628,10 +634,12 @@ def _present_split(screen, new_frame, animate=True):
                 screen.blit(new_frame, (0, 0))
                 screen.blit(left, (-dx, 0))           # left half exits left
                 screen.blit(right, (half + dx, 0))    # right half exits right
+                _stamp(screen, overlay)
                 pygame.display.flip()
                 pygame.time.delay(16)
                 dx += step
         screen.blit(new_frame, (0, 0))
+        _stamp(screen, overlay)
         pygame.display.flip()
     except Exception as e:
         log_error(f"Split transition failed: {e}")
@@ -645,8 +653,11 @@ def _pick_transition(config):
     return ts
 
 
-def _fade_through_black(screen, frame):
-    """Fade the current frame down to black, then fade the new one up."""
+def _fade_through_black(screen, frame, overlay=None):
+    """Fade the current frame down to black, then fade the new one up.
+
+    The persistent band overlay (if any) stays fully visible on top throughout,
+    so the photo dips to black but the time/weather band never blanks out."""
     try:
         w, h = screen.get_size()
         old = screen.copy()
@@ -656,26 +667,32 @@ def _fade_through_black(screen, frame):
             screen.blit(old, (0, 0))
             black.set_alpha(a)
             screen.blit(black, (0, 0))
+            _stamp(screen, overlay)
             pygame.display.flip()
             pygame.time.delay(14)
         for a in range(0, 256, 30):          # black -> new
             screen.fill((0, 0, 0))
             frame.set_alpha(a)
             screen.blit(frame, (0, 0))
+            _stamp(screen, overlay)
             pygame.display.flip()
             pygame.time.delay(14)
         frame.set_alpha(255)
         screen.blit(frame, (0, 0))
+        _stamp(screen, overlay)
         pygame.display.flip()
     except Exception as e:
         log_error(f"Fade-through-black failed: {e}")
 
 
-def _present(screen, frame, fade=True, style="crossfade"):
-    """Blit a finished frame to the screen, with the chosen transition."""
+def _present(screen, frame, fade=True, style="crossfade", overlay=None):
+    """Blit a finished frame to the screen, with the chosen transition.
+
+    overlay (a per-pixel-alpha surface) is re-stamped on top of every animation
+    frame so it stays put through the transition instead of blanking out."""
     try:
         if fade and style == "fade_black":
-            _fade_through_black(screen, frame)
+            _fade_through_black(screen, frame, overlay)
             return
         if fade:  # crossfade
             old = screen.copy()
@@ -683,21 +700,24 @@ def _present(screen, frame, fade=True, style="crossfade"):
                 frame.set_alpha(alpha)
                 screen.blit(old, (0, 0))
                 screen.blit(frame, (0, 0))
+                _stamp(screen, overlay)
                 pygame.display.flip()
                 pygame.time.delay(16)
             frame.set_alpha(255)
         screen.blit(frame, (0, 0))
+        _stamp(screen, overlay)
         pygame.display.flip()
     except Exception as e:
         log_error(f"Frame present failed: {e}")
 
 
-def show_layout(screen, image_paths, config, mode, file_meta=None, fade=True):
+def show_layout(screen, image_paths, config, mode, file_meta=None, fade=True, overlay=None):
     """Render a layout (single / tile3 / tile6) with an optional crossfade.
 
     image_paths must hold enough images for the mode; the caller guarantees
     this and falls back to 'single' otherwise. file_meta=(date, caption) is
-    only used in single mode.
+    only used in single mode. overlay is a persistent band re-stamped on top of
+    every transition frame so it never blanks out.
     """
     try:
         w, h = screen.get_size()
@@ -705,7 +725,9 @@ def show_layout(screen, image_paths, config, mode, file_meta=None, fade=True):
 
         if mode == "split":
             frame = _build_split_frame(screen, image_paths, config)
-            _present_split(screen, frame, animate=fade and config.get("layout_fade_enabled", True))
+            _present_split(screen, frame,
+                           animate=fade and config.get("layout_fade_enabled", True),
+                           overlay=overlay)
             return
         elif mode == "cascade":
             frame = _build_cascade_frame(screen, image_paths, config)
@@ -720,6 +742,6 @@ def show_layout(screen, image_paths, config, mode, file_meta=None, fade=True):
             frame = _build_single_frame(screen, image_paths[0], config, date, cap)
 
         _present(screen, frame, fade=fade and config.get("layout_fade_enabled", True),
-                 style=_pick_transition(config))
+                 style=_pick_transition(config), overlay=overlay)
     except Exception as e:
         log_error(f"show_layout failed ({mode}): {e}")

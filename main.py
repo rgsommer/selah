@@ -169,11 +169,35 @@ def _check_flashbacks(state, config, portrait_files, landscape_files, screens):
     show_toast_if_needed(screens, config, "Today's special photos")
 
 
+def _build_band_overlay(screen, config):
+    """Pre-render the persistent time/weather band onto a transparent layer so
+    the transition can keep it visible. Returns None when persist mode is off or
+    nothing is enabled/available to draw."""
+    if not config.get("overlay_band_persist", True):
+        return None
+    status_on = config.get("status_line_enabled", False)
+    pill_on = config.get("weather_pill_enabled", False)
+    if not (status_on or pill_on):
+        return None
+    try:
+        layer = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+        drew = False
+        if status_on:
+            drew = draw_status_line(screen, config, layer) or drew
+        if pill_on:
+            drew = draw_weather_pill(screen, config, layer) or drew
+        return layer if drew else None
+    except Exception as e:
+        log_error(f"Band overlay build failed: {e}")
+        return None
+
+
 def _render_frame(screen, frame, config, media_log):
     """Render an already-decided frame: {"mode", "picks", "caption"}."""
     try:
         mode, picks = frame["mode"], frame["picks"]
         cap_override = frame.get("caption")
+        band = _build_band_overlay(screen, config)
         if mode == "single":
             f = picks[0]
             if f.lower().endswith(VIDEO_EXTS):
@@ -182,10 +206,10 @@ def _render_frame(screen, frame, config, media_log):
             else:
                 fd, cap = ((None, cap_override) if cap_override is not None
                            else _get_media_metadata(f, media_log))
-                show_layout(screen, [f], config, "single", file_meta=(fd, cap))
+                show_layout(screen, [f], config, "single", file_meta=(fd, cap), overlay=band)
             _set_now_showing(f)
         else:
-            show_layout(screen, picks, config, mode)
+            show_layout(screen, picks, config, mode, overlay=band)
             _set_now_showing(picks[0])
     except Exception as e:
         log_error(f"Render frame failed: {e}")
@@ -714,6 +738,9 @@ def main():
                              if t.startswith("portrait") or t.startswith("landscape")]
             is_single = len(photo_screens) == 1
             stagger = (not config.get("screen_rotation_sync", True)) and len(photo_screens) >= 2
+            # In persist mode the band rides the transition itself, so the
+            # post-render overlay pass draws it instantly (no separate fade-in).
+            fade_band = not config.get("overlay_band_persist", True)
 
             if active and stagger:
                 # Staggered: render the first screen, then the rest a half-interval
@@ -722,12 +749,12 @@ def main():
                 t0, s0 = photo_screens[0]
                 _render_one_screen(t0, s0, portrait_files, landscape_files,
                                    state, config, media_log, is_single, current_ts)
-                _draw_overlays({t0: s0}, config, fade=True)
+                _draw_overlays({t0: s0}, config, fade=fade_band)
                 time.sleep(max(0.5, rotate_interval / 2.0))
                 for t, s in photo_screens[1:]:
                     _render_one_screen(t, s, portrait_files, landscape_files,
                                        state, config, media_log, is_single, current_ts)
-                _draw_overlays(dict(photo_screens[1:]), config, fade=True)
+                _draw_overlays(dict(photo_screens[1:]), config, fade=fade_band)
                 time.sleep(max(0.5, rotate_interval / 2.0))
                 continue
 
@@ -736,7 +763,7 @@ def main():
                     _render_one_screen(t, s, portrait_files, landscape_files,
                                        state, config, media_log, is_single, current_ts)
 
-            _draw_overlays(screens, config, fade=active)
+            _draw_overlays(screens, config, fade=active and fade_band)
             time.sleep(rotate_interval)
 
     except KeyboardInterrupt:
