@@ -308,6 +308,7 @@ def show_config_gui(screen, config):
             ("photo_effect_sepia", "  Use Sepia", "bool"),
             ("photo_effect_bw", "  Use B&W", "bool"),
             ("balanced_rotation", "Balanced Folder Rotation", "bool"),
+            ("screen_rotation_sync", "Screens Change Together", "bool"),
             ("recent_memory_enabled", "Avoid Repeats (recent memory)", "bool"),
             ("on_this_day_enabled", "On-This-Day Flashbacks", "bool"),
             ("upload_qr_enabled", "Phone Upload QR", "bool"),

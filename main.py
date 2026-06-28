@@ -290,6 +290,55 @@ def _render_screen(screen, screen_type, files, state, config, media_log):
         state[screen_type]["index"] = i % len(files)
 
 
+def _render_one_screen(screen_type, screen, portrait_files, landscape_files,
+                       state, config, media_log, is_single, current_ts):
+    """Render one photo screen (placeholder if it has no media). Honors pause."""
+    if current_ts < state.get(screen_type, {}).get("paused_until", 0):
+        return
+    if is_single:
+        files = list(dict.fromkeys(portrait_files + landscape_files))
+    else:
+        files = portrait_files if screen_type.startswith("portrait") else landscape_files
+    if not files:
+        try:
+            screen.fill((20, 20, 40))
+            font = pygame.font.Font(None, 36)
+            text = font.render("Selah - Waiting for photos...", True, (150, 150, 150))
+            screen.blit(text, text.get_rect(center=screen.get_rect().center))
+            pygame.display.flip()
+        except Exception:
+            pass
+        return
+    _render_screen(screen, screen_type, files, state, config, media_log)
+
+
+def _draw_overlays(screens, config):
+    """Draw every overlay on top of the freshly rendered photo(s).
+
+    Must run AFTER the slideshow render — otherwise the photo covers them.
+    Pass a subset of screens (staggered mode) to draw on just those.
+    """
+    try:
+        show_toast_if_needed(screens, config)
+        if config.get("verse_display_enabled", False):
+            show_verse_if_scheduled(screens, config)
+        if config.get("calendar_display_enabled", False):
+            show_calendar_if_scheduled(screens, config)
+        if config.get("weather_enabled", False):
+            show_weather_if_scheduled(screens, config)
+        if config.get("status_line_enabled", False):
+            show_status_line(screens, config)
+        if config.get("weather_pill_enabled", False):
+            show_weather_pill(screens, config)
+        if config.get("upload_qr_enabled", False):
+            show_upload_qr_if_scheduled(screens, config)
+        if config.get("coming_up_enabled", False):
+            show_coming_up_if_scheduled(screens, config)
+        show_pending_badge(screens, config)
+    except Exception as e:
+        log_error(f"Overlay draw failed: {e}")
+
+
 def main():
     print("[Selah] Starting display system...")
     config = load_config("display_config.json")
@@ -597,82 +646,42 @@ def main():
                 state["new_media"] = None
                 continue
 
-            # ---- TOAST NOTIFICATIONS ----
-            show_toast_if_needed(screens, config)
-
-            # ---- SCHEDULED OVERLAYS ----
-            if config.get("verse_display_enabled", False):
-                show_verse_if_scheduled(screens, config)
-
-            if config.get("calendar_display_enabled", False):
-                show_calendar_if_scheduled(screens, config)
-
-            if config.get("weather_enabled", False):
-                show_weather_if_scheduled(screens, config)
-
             # ---- VOICE CONTROL ----
             if config.get("voice_control_enabled", False):
                 process_voice_command(screens, config, state, portrait_files, landscape_files)
 
-            # ---- MAIN SLIDESHOW ROTATION ----
-            if not state.get("paused", False) and (
-                    state.get("slideshow_active", True) or not config.get("motion_triggered_slideshow", False)):
-                photo_screens = [k for k in screens
-                                 if k.startswith("portrait") or k.startswith("landscape")]
-                is_single_screen = len(photo_screens) == 1
+            # ---- SLIDESHOW + OVERLAYS ----
+            # Overlays are drawn AFTER the photo so they sit on top instead of
+            # being covered (that's why the weather/calendar weren't showing).
+            active = (not state.get("paused", False)) and (
+                state.get("slideshow_active", True) or not config.get("motion_triggered_slideshow", False))
+            photo_screens = [(t, s) for t, s in screens.items()
+                             if t.startswith("portrait") or t.startswith("landscape")]
+            is_single = len(photo_screens) == 1
+            stagger = (not config.get("screen_rotation_sync", True)) and len(photo_screens) >= 2
 
-                for screen_type, screen in screens.items():
-                    # Handle every photo screen, including 'landscape_2'/'portrait_2'.
-                    if not (screen_type.startswith("portrait") or screen_type.startswith("landscape")):
-                        continue
-                    # Skip if manually paused
-                    if current_ts < state.get(screen_type, {}).get("paused_until", 0):
-                        continue
+            if active and stagger:
+                # Staggered: render the first screen, then the rest a half-interval
+                # later, so the two screens never change at the same moment. Overlays
+                # are drawn per group (on a fresh photo) to avoid darkening.
+                t0, s0 = photo_screens[0]
+                _render_one_screen(t0, s0, portrait_files, landscape_files,
+                                   state, config, media_log, is_single, current_ts)
+                _draw_overlays({t0: s0}, config)
+                time.sleep(max(0.5, rotate_interval / 2.0))
+                for t, s in photo_screens[1:]:
+                    _render_one_screen(t, s, portrait_files, landscape_files,
+                                       state, config, media_log, is_single, current_ts)
+                _draw_overlays(dict(photo_screens[1:]), config)
+                time.sleep(max(0.5, rotate_interval / 2.0))
+                continue
 
-                    if is_single_screen:
-                        # Single screen: combine both lists so all photos get shown
-                        combined = portrait_files + landscape_files
-                        # Remove duplicates (videos appear in both lists)
-                        combined = list(dict.fromkeys(combined))
-                        files = combined
-                    else:
-                        files = portrait_files if screen_type.startswith("portrait") else landscape_files
+            if active:
+                for t, s in photo_screens:
+                    _render_one_screen(t, s, portrait_files, landscape_files,
+                                       state, config, media_log, is_single, current_ts)
 
-                    if not files:
-                        # Show a "no media" placeholder
-                        screen.fill((20, 20, 40))
-                        try:
-                            font = pygame.font.Font(None, 36)
-                            text = font.render("Selah - Waiting for photos...", True, (150, 150, 150))
-                            rect = text.get_rect(center=screen.get_rect().center)
-                            screen.blit(text, rect)
-                            pygame.display.flip()
-                        except Exception:
-                            pass
-                        continue
-
-                    _render_screen(screen, screen_type, files, state, config, media_log)
-
-            # ---- STATUS LINE (time + temp + today's forecast) ----
-            # Drawn last so it sits on top of the freshly rendered photo.
-            if config.get("status_line_enabled", False):
-                show_status_line(screens, config)
-
-            # ---- WEATHER PILL (always-on corner) ----
-            if config.get("weather_pill_enabled", False):
-                show_weather_pill(screens, config)
-
-            # ---- PHONE-UPLOAD QR (periodic corner overlay) ----
-            if config.get("upload_qr_enabled", False):
-                show_upload_qr_if_scheduled(screens, config)
-
-            # ---- "COMING UP" birthday heads-up (periodic) ----
-            if config.get("coming_up_enabled", False):
-                show_coming_up_if_scheduled(screens, config)
-
-            # ---- PENDING-APPROVAL badge (subtle corner chip; F5 approves all) ----
-            show_pending_badge(screens, config)
-
+            _draw_overlays(screens, config)
             time.sleep(rotate_interval)
 
     except KeyboardInterrupt:

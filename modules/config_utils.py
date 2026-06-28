@@ -24,6 +24,7 @@ DEFAULT_CONFIG = {
     "recent_memory_enabled": True,
     "recent_memory": 0,
     "balanced_rotation": True,
+    "screen_rotation_sync": True,
     "on_this_day_enabled": True,
     "upload_qr_enabled": False,
     "upload_qr_interval_minutes": 30,
