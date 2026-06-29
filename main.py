@@ -688,6 +688,18 @@ def main():
                     # True dark: actually power off the HDMI (no backlight glow).
                     from modules.screen_power import screen_off
                     screen_off()
+                elif config.get("night_portrait_off", True):
+                    # Portrait screen goes dark (blanked); landscape shows the
+                    # analog clock through the night.
+                    for stype, screen in screens.items():
+                        if stype.startswith("portrait"):
+                            screen.fill((0, 0, 0))
+                        else:
+                            show_clock_with_quote(screen, config)
+                    try:
+                        pygame.display.flip()  # commit the blanked portrait half
+                    except Exception:
+                        pass
                 else:
                     # Dedicate one HDMI to a large moon phase (if enabled); the
                     # rest show the analog clock + nightly quote.
