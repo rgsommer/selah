@@ -155,12 +155,14 @@ def get_images_and_videos(config):
         # graphics like Drive's generic "?" file). 0 disables the size check.
         min_px = int(config.get("min_photo_px", 0) or 0)
 
-        def collect_files(folder, forced_list_by_folder=None, orientation=None):
+        def collect_files(folder, forced_list_by_folder=None, orientation=None, deep_group=False):
             """Collect media files from a folder.
 
             If orientation is specified, all files go to forced_list_by_folder.
             Otherwise, detect orientation and sort into portrait/landscape.
-            Tracks which immediate subfolder (or root folder) each file belongs to.
+            Grouping key is the immediate subfolder by default; with deep_group
+            it's the file's full directory, so a big nested folder is split into
+            many buckets and gets proportional airtime in balanced rotation.
             """
             folder_path = Path(folder)
             if not folder_path.exists():
@@ -174,13 +176,14 @@ def get_images_and_videos(config):
                 if privacy_on and any(tok in filepath.lower() for tok in private_tokens):
                     continue
 
-                # Determine the grouping key: the immediate subfolder under
-                # the scanned folder, or the folder itself if file is at root
+                # Determine the grouping key.
                 relative = path.relative_to(folder_path)
-                if len(relative.parts) > 1:
-                    group_key = str(folder_path / relative.parts[0])
-                else:
+                if len(relative.parts) <= 1:
                     group_key = str(folder_path)
+                elif deep_group:
+                    group_key = str(path.parent)              # full leaf directory
+                else:
+                    group_key = str(folder_path / relative.parts[0])  # immediate subfolder
 
                 is_img = path.suffix.lower() in image_ext
                 if is_img:
@@ -223,7 +226,10 @@ def get_images_and_videos(config):
                 for s in (portrait_dir, landscape_dir, art_dir, display_dir)
             )
             if not already:
-                collect_files(drive_pull_dir, orientation=None)
+                # Deep-group so big Drive folders (e.g. Family/) get airtime in
+                # proportion to their size instead of one slot for the whole tree.
+                collect_files(drive_pull_dir, orientation=None,
+                              deep_group=config.get("shared_drive_granular", True))
 
             # Collect dated folders (e.g., media/2025-05-10/)
             media_path = Path(media_folder)
