@@ -63,10 +63,12 @@ def show_moon_phase(screen, config):
         cx = w // 2
         cy = int(h * 0.42)
 
-        _draw_moon(screen, cx, cy, r, f, waxing)
+        # Keep the room dark: a dim sepia moon, not a bright cream one.
+        lit = tuple(config.get("moon_lit_color", (120, 96, 60)))
+        _draw_moon(screen, cx, cy, r, f, waxing, lit)
 
         # Labels: phase name + % lit, and the time (so a single-HDMI setup still
-        # shows the clock).
+        # shows the clock). Dimmed to match the sepia moon.
         name = phase_name(phase)
         pct = int(round(f * 100))
         big = pygame.font.Font(None, max(28, w // 24))
@@ -76,9 +78,9 @@ def show_moon_phase(screen, config):
         except Exception:
             tstr = datetime.datetime.now().strftime("%H:%M")
 
-        name_surf = big.render(f"{name}  -  {pct}% lit", True, (210, 215, 235))
+        name_surf = big.render(f"{name}  -  {pct}% lit", True, (120, 102, 78))
         screen.blit(name_surf, name_surf.get_rect(center=(cx, cy + r + big.get_linesize())))
-        time_surf = small.render(tstr, True, (150, 160, 190))
+        time_surf = small.render(tstr, True, (110, 96, 74))
         screen.blit(time_surf, time_surf.get_rect(
             center=(cx, cy + r + big.get_linesize() + small.get_linesize() + 6)))
 
@@ -90,16 +92,17 @@ def show_moon_phase(screen, config):
         log_error(f"Moon phase render failed: {e}")
 
 
-def _draw_moon(screen, cx, cy, r, f, waxing):
+def _draw_moon(screen, cx, cy, r, f, waxing, lit=(120, 96, 60)):
     """Draw a dark disk, then fill the lit portion scanline-by-scanline.
 
     For each row the lit span runs between the limb and the terminator:
       waxing: x in [(1-2f)*xw, xw]      (right side lights up)
       waning: x in [-xw, (2f-1)*xw]     (left side stays lit)
     where xw = sqrt(r^2 - y^2). This is continuous through new and full.
+
+    `lit` defaults to a dim sepia so the moon doesn't light up the room.
     """
-    dark = (38, 42, 56)
-    lit = (236, 236, 214)
+    dark = (30, 28, 26)
 
     pygame.draw.circle(screen, dark, (cx, cy), r)
 
@@ -113,4 +116,4 @@ def _draw_moon(screen, cx, cy, r, f, waxing):
             y = cy + dy
             pygame.draw.line(screen, lit, (int(cx + x0), y), (int(cx + x1), y))
 
-    pygame.draw.circle(screen, (88, 94, 116), (cx, cy), r, max(2, r // 120))
+    pygame.draw.circle(screen, (70, 60, 48), (cx, cy), r, max(2, r // 120))
