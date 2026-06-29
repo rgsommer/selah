@@ -296,6 +296,9 @@ def show_config_gui(screen, config):
         # type "layoutbool" toggles config["layout_weights"][key] on/off.
         editable_fields = [
             # --- Layout variety ---
+            ("videos_enabled", "Play Videos", "bool"),
+            ("video_muted", "  Mute Videos", "bool"),
+            ("video_max_seconds", "  Max Video Length (sec, 0=full)", "int"),
             ("layout_variety_enabled", "Layout Variety", "bool"),
             ("single", "  Layout: Full Single", "layoutbool"),
             ("split", "  Layout: Split (2, slide)", "layoutbool"),

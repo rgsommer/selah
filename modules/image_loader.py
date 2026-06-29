@@ -154,6 +154,7 @@ def get_images_and_videos(config):
         # anything below min_photo_px on the long edge (placeholder/icon
         # graphics like Drive's generic "?" file). 0 disables the size check.
         min_px = int(config.get("min_photo_px", 0) or 0)
+        videos_on = config.get("videos_enabled", True)
 
         def collect_files(folder, forced_list_by_folder=None, orientation=None, deep_group=False):
             """Collect media files from a folder.
@@ -192,6 +193,8 @@ def get_images_and_videos(config):
                         continue
                     if min_px and 0 < edge < min_px:    # placeholder / icon
                         continue
+                elif not videos_on:                     # videos turned off
+                    continue
 
                 if orientation and forced_list_by_folder is not None:
                     forced_list_by_folder.setdefault(group_key, []).append(filepath)

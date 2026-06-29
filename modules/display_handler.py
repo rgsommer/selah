@@ -326,7 +326,10 @@ def show_video(screen, video_path, config, file_date=None, caption=None):
         log_error("VLC not available, skipping video playback")
         return
     try:
-        instance = vlc.Instance("--no-xlib")
+        args = ["--no-xlib"]
+        if config.get("video_muted", True):
+            args.append("--no-audio")     # quiet frame by default
+        instance = vlc.Instance(*args)
         player = instance.media_player_new()
         media = instance.media_new(video_path)
         player.set_media(media)
@@ -344,11 +347,11 @@ def show_video(screen, video_path, config, file_date=None, caption=None):
         # Draw metadata overlay
         _draw_overlay(screen, video_path, config, file_date, caption)
 
-        # Wait for video to finish (with timeout based on rotate_interval * 3)
-        max_wait = config.get("rotate_interval", 10) * 3
+        # Play until the video ends, or up to video_max_seconds (0 = play full).
+        max_wait = config.get("video_max_seconds", 60)
         start = time.time()
         while player.get_state() not in [vlc.State.Ended, vlc.State.Error]:
-            if time.time() - start > max_wait:
+            if max_wait and time.time() - start > max_wait:
                 break
             for event in pygame.event.get():
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
