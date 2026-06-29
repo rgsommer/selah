@@ -690,10 +690,19 @@ def main():
                     screen_off()
                 elif config.get("night_portrait_off", True):
                     # Portrait screen goes dark (blanked); landscape shows the
-                    # analog clock through the night.
+                    # moon phase + analog clock through the night.
                     for stype, screen in screens.items():
                         if stype.startswith("portrait"):
                             screen.fill((0, 0, 0))
+                            continue
+                        if config.get("moon_phase_enabled", True):
+                            w, h = screen.get_size()
+                            half = w // 2
+                            try:
+                                show_moon_phase(screen.subsurface((0, 0, half, h)), config)
+                                show_clock_with_quote(screen.subsurface((half, 0, w - half, h)), config)
+                            except Exception:
+                                show_clock_with_quote(screen, config)
                         else:
                             show_clock_with_quote(screen, config)
                     try:
