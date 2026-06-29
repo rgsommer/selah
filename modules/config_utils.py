@@ -52,6 +52,7 @@ DEFAULT_CONFIG = {
     "calendar_times": [],
     "calendar_duration_minutes": 0,
     "google_calendar_id": "primary",
+    "calendar_use_all_calendars": True,
     "info_panel_split": True,
     "info_panel_side": "right",
     "moon_phase_enabled": True,

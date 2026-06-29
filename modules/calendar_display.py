@@ -103,23 +103,47 @@ def _try_google_calendar(config):
             hour=0, minute=0, second=0, microsecond=0)
         end = start + datetime.timedelta(days=2)
 
-        events_result = service.events().list(
-            calendarId=config.get("google_calendar_id", "primary"),
-            timeMin=start.isoformat(),
-            timeMax=end.isoformat(),
-            maxResults=25,
-            singleEvents=True,
-            orderBy="startTime"
-        ).execute()
+        # By default pull from every calendar the account subscribes to (and
+        # keeps visible); set calendar_use_all_calendars:false to read only
+        # google_calendar_id.
+        if config.get("calendar_use_all_calendars", True):
+            cal_ids = []
+            page = None
+            while True:
+                cl = service.calendarList().list(pageToken=page).execute()
+                for c in cl.get("items", []):
+                    if c.get("selected") is False:
+                        continue  # skip calendars the user has unchecked/hidden
+                    cal_ids.append(c["id"])
+                page = cl.get("nextPageToken")
+                if not page:
+                    break
+            if not cal_ids:
+                cal_ids = [config.get("google_calendar_id", "primary")]
+        else:
+            cal_ids = [config.get("google_calendar_id", "primary")]
 
         events = []
-        for event in events_result.get("items", []):
-            start = event["start"].get("dateTime", event["start"].get("date"))
-            events.append({
-                "summary": event.get("summary", "Untitled"),
-                "start": start,
-                "location": event.get("location", "")
-            })
+        for cid in cal_ids:
+            try:
+                res = service.events().list(
+                    calendarId=cid,
+                    timeMin=start.isoformat(),
+                    timeMax=end.isoformat(),
+                    maxResults=25,
+                    singleEvents=True,
+                    orderBy="startTime",
+                ).execute()
+                for event in res.get("items", []):
+                    s = event["start"].get("dateTime", event["start"].get("date"))
+                    events.append({
+                        "summary": event.get("summary", "Untitled"),
+                        "start": s,
+                        "location": event.get("location", ""),
+                    })
+            except Exception as e:
+                log_error(f"Calendar fetch failed for {cid}: {e}")
+        events.sort(key=lambda e: e.get("start", ""))
         return events
     except Exception as e:
         log_error(f"Google Calendar fetch failed: {e}")

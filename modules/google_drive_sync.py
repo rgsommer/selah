@@ -37,7 +37,10 @@ except ImportError:
 from modules.logger import log_error
 
 # If modifying scopes, delete token.json so the user re-authorizes.
-SCOPES = ["https://www.googleapis.com/auth/drive"]
+SCOPES = [
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/calendar.readonly",
+]
 
 # MIME types we care about
 IMAGE_MIMES = {
