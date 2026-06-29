@@ -399,7 +399,7 @@ def _draw_overlay(screen, file_path, config, file_date=None, caption=None):
 # Layout variety — full single / tile-3 / tile-6 with crossfade transitions
 # ---------------------------------------------------------------------------
 
-_LAYOUT_COUNTS = {"single": 1, "split": 2, "cascade": 3, "tile3": 3, "tile6": 6}
+_LAYOUT_COUNTS = {"single": 1, "split": 2, "cascade": 2, "tile3": 3, "tile6": 6}
 
 
 def layout_file_count(mode):
@@ -580,25 +580,32 @@ def _build_split_frame(screen, paths, config):
 
 
 def _build_cascade_frame(screen, paths, config):
-    """3 photos cascading diagonally top-left -> center -> bottom-right, each
-    overlapping a corner of the previous (a stacked-snapshots look)."""
+    """Two photos anchored in opposite corners, overlapping only where their
+    edges meet near the centre (a relaxed stacked-snapshots look)."""
     w, h = screen.get_size()
     frame = pygame.Surface((w, h))
     frame.fill((16, 16, 22))
-    cell_w, cell_h = int(w * 0.52), int(h * 0.52)
-    offsets = [(0.02, 0.02), (0.25, 0.25), (0.46, 0.46)]
+    cell_w, cell_h = int(w * 0.6), int(h * 0.62)
     border = max(4, w // 220)
-    for idx, (ox, oy) in enumerate(offsets):
-        if idx >= len(paths):
-            break
+    margin = max(8, w // 80)
+    # Pick a diagonal for variety: top-left+bottom-right, or top-right+bottom-left.
+    corners = random.choice((("tl", "br"), ("tr", "bl")))
+    for idx in range(min(2, len(paths))):
         try:
             img = _scaled_image(paths[idx], cell_w, cell_h)
             if not img:
                 continue
             img = _maybe_effect(img, config)
             iw, ih = img.get_size()
-            x = min(int(ox * w), w - iw - border)
-            y = min(int(oy * h), h - ih - border)
+            corner = corners[idx]
+            if corner == "tl":
+                x, y = margin, margin
+            elif corner == "tr":
+                x, y = w - iw - margin, margin
+            elif corner == "bl":
+                x, y = margin, h - ih - margin
+            else:  # br
+                x, y = w - iw - margin, h - ih - margin
             pygame.draw.rect(frame, (240, 240, 240),
                              (x - border, y - border, iw + 2 * border, ih + 2 * border))
             frame.blit(img, (x, y))
