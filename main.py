@@ -732,6 +732,25 @@ def main():
                                              {"agenda": "Agenda",
                                               "forecast": "5-day forecast",
                                               None: "Panel hidden"}[nxt])
+                    elif event.key == pygame.K_F7:
+                        # Show today's on-this-day memories now (queue them up).
+                        try:
+                            from collections import deque
+                            files = list(dict.fromkeys(portrait_files + landscape_files))
+                            fb = todays_flashbacks(files, config)
+                            shuffle(fb)
+                            fq = state.get("flashback_queue")
+                            if not isinstance(fq, deque):
+                                fq = deque()
+                                state["flashback_queue"] = fq
+                            for path, year in reversed(fb[:20]):
+                                fq.appendleft((path, f"On this day, {year}"))
+                            show_toast_if_needed(
+                                screens, config,
+                                f"On this day — {len(fb[:20])} memor{'y' if len(fb[:20])==1 else 'ies'}"
+                                if fb else "No memories for today")
+                        except Exception as e:
+                            log_error(f"F7 on-this-day failed: {e}")
                     elif event.key in (pygame.K_h, pygame.K_QUESTION) or event.unicode == "?":
                         from modules.help_overlay import show_help
                         target = screens.get("landscape") or screens.get("portrait")
