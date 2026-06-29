@@ -395,6 +395,21 @@ def _draw_time_weather(screens, config, fade):
             pass
 
 
+def _responsive_sleep(seconds):
+    """Sleep up to `seconds`, but return the instant an input event is queued so
+    arrows / spacebar / F-keys / touch act immediately instead of waiting out
+    the rest of the current rotation."""
+    interrupt = (pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN)
+    end = time.time() + max(0.0, seconds)
+    while time.time() < end:
+        try:
+            if pygame.event.peek(interrupt):
+                return  # leave it queued; the top of the loop handles it
+        except Exception:
+            pass
+        pygame.time.delay(40)
+
+
 def _render_screen_with_panel(screen_type, screen, portrait_files, landscape_files,
                               state, config, media_log, is_single, current_ts,
                               panel_kind, side):
@@ -833,7 +848,7 @@ def main():
                         photo_subs[t] = psub
                 if photo_subs:
                     _draw_overlays(photo_subs, config, fade=fade_band)
-                time.sleep(rotate_interval)
+                _responsive_sleep(rotate_interval)
                 continue
 
             if active and stagger:
@@ -844,12 +859,12 @@ def main():
                 _render_one_screen(t0, s0, portrait_files, landscape_files,
                                    state, config, media_log, is_single, current_ts)
                 _draw_overlays({t0: s0}, config, fade=fade_band)
-                time.sleep(max(0.5, rotate_interval / 2.0))
+                _responsive_sleep(max(0.5, rotate_interval / 2.0))
                 for t, s in photo_screens[1:]:
                     _render_one_screen(t, s, portrait_files, landscape_files,
                                        state, config, media_log, is_single, current_ts)
                 _draw_overlays(dict(photo_screens[1:]), config, fade=fade_band)
-                time.sleep(max(0.5, rotate_interval / 2.0))
+                _responsive_sleep(max(0.5, rotate_interval / 2.0))
                 continue
 
             if active:
@@ -858,7 +873,7 @@ def main():
                                        state, config, media_log, is_single, current_ts)
 
             _draw_overlays(screens, config, fade=active and fade_band)
-            time.sleep(rotate_interval)
+            _responsive_sleep(rotate_interval)
 
     except KeyboardInterrupt:
         print("\n[Selah] Interrupted - shutting down.")
