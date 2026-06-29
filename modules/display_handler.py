@@ -437,9 +437,13 @@ def _load_surface(image_path):
     try:
         from PIL import Image, ImageOps
         with Image.open(image_path) as im:
+            # Decode JPEGs at reduced resolution up front so a giant scan never
+            # allocates the full bitmap (~585MB for 195MP) on the Pi.
+            try:
+                im.draft("RGB", (4000, 4000))
+            except Exception:
+                pass
             im = ImageOps.exif_transpose(im).convert("RGB")
-            # Cap working size so giant scans don't allocate a huge surface
-            # (a 195MP image would be ~585MB as RGB) on the Pi.
             if max(im.size) > 4000:
                 im.thumbnail((4000, 4000), Image.LANCZOS)
             return pygame.image.fromstring(im.tobytes(), im.size, "RGB")

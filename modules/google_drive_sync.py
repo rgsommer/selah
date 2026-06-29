@@ -88,12 +88,20 @@ def _maybe_downscale(path, config):
     try:
         from PIL import Image, ImageOps
         with Image.open(p) as im:
+            ow, oh = im.size                  # header read — cheap, no full decode
+            if max(ow, oh) <= max_edge:
+                return  # already small enough
+            # Decode JPEGs at reduced resolution so a 195MP scan doesn't load
+            # ~585MB into RAM (no-op for non-JPEG).
+            try:
+                im.draft("RGB", (max_edge, max_edge))
+            except Exception:
+                pass
             im = ImageOps.exif_transpose(im)  # bake rotation in before stripping EXIF
             w, h = im.size
-            if max(w, h) <= max_edge:
-                return  # already small enough
             scale = max_edge / float(max(w, h))
-            im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+            if scale < 1:
+                im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
             lp = p.lower()
             if lp.endswith(".png"):
                 im.save(p, optimize=True)
