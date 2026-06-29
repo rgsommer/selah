@@ -402,10 +402,15 @@ def _render_screen_with_panel(screen_type, screen, portrait_files, landscape_fil
     slideshow rendered into the other half. Returns the photo half subsurface
     (for overlays), or None on failure."""
     w, h = screen.get_size()
-    half = w // 2
-    if side == "left":
+    if h > w:
+        # Portrait screen: split top/bottom with the panel along the bottom.
+        half = h // 2
+        photo_rect, panel_rect = (0, 0, w, half), (0, half, w, h - half)
+    elif side == "left":
+        half = w // 2
         panel_rect, photo_rect = (0, 0, half, h), (half, 0, w - half, h)
     else:
+        half = w // 2
         photo_rect, panel_rect = (0, 0, half, h), (half, 0, w - half, h)
     try:
         photo_sub = screen.subsurface(photo_rect)
