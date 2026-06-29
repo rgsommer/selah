@@ -28,6 +28,8 @@ DEFAULT_CONFIG = {
     "balanced_rotation": True,
     "screen_rotation_sync": True,
     "on_this_day_enabled": True,
+    "on_this_day_sprinkle": False,
+    "on_this_day_interval_minutes": 30,
     "upload_qr_enabled": False,
     "upload_qr_interval_minutes": 30,
     "upload_qr_seconds": 20,

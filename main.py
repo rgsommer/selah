@@ -141,13 +141,14 @@ def _check_flashbacks(state, config, portrait_files, landscape_files, screens):
     state["flashback_date"] = today
 
     from collections import deque
-    queue = []
+    greetings = []   # time-sensitive — always shown first thing
+    memories = []    # on-this-day flashbacks — first thing OR sprinkled
 
     # Dated greetings scheduled for today (family folder / email).
     try:
         from modules.scheduled_media import todays_scheduled
         for it in todays_scheduled():
-            queue.append((it["path"], it.get("caption") or "A special greeting"))
+            greetings.append((it["path"], it.get("caption") or "A special greeting"))
     except Exception as e:
         log_error(f"Scheduled media check failed: {e}")
 
@@ -163,12 +164,40 @@ def _check_flashbacks(state, config, portrait_files, landscape_files, screens):
         # are chosen when more than 20 photos qualify for today).
         shuffle(fb)
         for path, year in fb[:20]:
-            queue.append((path, f"On this day, {year}"))
+            memories.append((path, f"On this day, {year}"))
 
-    if not queue:
+    if not greetings and not memories:
         return
-    state["flashback_queue"] = deque(queue)
-    show_toast_if_needed(screens, config, "Today's special photos")
+
+    if config.get("on_this_day_sprinkle", False) and memories:
+        # Greetings still play first thing; memories release one at a time
+        # through the day so a flashback surfaces every so often.
+        state["flashback_queue"] = deque(greetings)
+        state["sprinkle_pool"] = deque(memories)
+        state["next_sprinkle"] = time.time() + config.get(
+            "on_this_day_interval_minutes", 30) * 60
+        show_toast_if_needed(screens, config, "Today's memories will surface through the day")
+    else:
+        state["flashback_queue"] = deque(greetings + memories)
+        show_toast_if_needed(screens, config, "Today's special photos")
+
+
+def _maybe_sprinkle(state, config, current_ts):
+    """Release one on-this-day flashback into the queue every
+    on_this_day_interval_minutes, when sprinkle mode is on."""
+    pool = state.get("sprinkle_pool")
+    if not pool:
+        return
+    if current_ts < state.get("next_sprinkle", 0):
+        return
+    from collections import deque
+    item = pool.popleft()
+    fq = state.get("flashback_queue")
+    if not isinstance(fq, deque):
+        fq = deque()
+        state["flashback_queue"] = fq
+    fq.appendleft(item)   # show it on the next rotation
+    state["next_sprinkle"] = current_ts + config.get("on_this_day_interval_minutes", 30) * 60
 
 
 def _build_band_overlay(screen, config):
@@ -649,6 +678,8 @@ def main():
 
             # On-this-day flashbacks — queue once each morning.
             _check_flashbacks(state, config, portrait_files, landscape_files, screens)
+            # Sprinkle mode: release a memory into the queue every so often.
+            _maybe_sprinkle(state, config, current_ts)
 
             # Drain the event queue ONCE, then share it with both handlers so
             # neither starves the other (this is why F-keys never fired before).
