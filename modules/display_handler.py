@@ -374,7 +374,7 @@ def _draw_overlay(screen, file_path, config, file_date=None, caption=None):
         if config.get("show_file_date", False) and file_date:
             date_str = file_date if isinstance(file_date, str) else str(file_date)
             items.append(f"{date_str}")
-        if config.get("show_file_name", False):
+        if config.get("show_file_name", True):
             items.append(os.path.basename(file_path))
 
         # Draw from bottom up with semi-transparent background
