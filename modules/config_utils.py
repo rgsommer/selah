@@ -177,6 +177,13 @@ def load_config(path="display_config.json"):
         if val:
             config[cfg_key] = val
 
+    # Gmail app passwords are displayed in 4-char groups ("abcd efgh ijkl mnop")
+    # but must be used with the spaces removed — normalize so a pasted-with-
+    # spaces password still authenticates.
+    pw = config.get("email_password")
+    if isinstance(pw, str) and " " in pw:
+        config["email_password"] = pw.replace(" ", "").strip()
+
     return config
 
 
