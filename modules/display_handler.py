@@ -399,7 +399,7 @@ def _draw_overlay(screen, file_path, config, file_date=None, caption=None):
 # Layout variety — full single / tile-3 / tile-6 with crossfade transitions
 # ---------------------------------------------------------------------------
 
-_LAYOUT_COUNTS = {"single": 1, "split": 2, "cascade": 2, "tile3": 3, "tile6": 6}
+_LAYOUT_COUNTS = {"single": 1, "split": 2, "cascade": 3, "tile3": 3, "tile6": 6}
 
 
 def layout_file_count(mode):
@@ -580,35 +580,38 @@ def _build_split_frame(screen, paths, config):
 
 
 def _build_cascade_frame(screen, paths, config):
-    """Two photos anchored in opposite corners, overlapping only where their
-    edges meet near the centre (a relaxed stacked-snapshots look)."""
+    """3 photos: the outer two pinned to opposite corners (top-left and
+    bottom-right) so they never overlap each other, and the middle one centred,
+    overlapping each only at a corner (a stacked-snapshots look)."""
     w, h = screen.get_size()
     frame = pygame.Surface((w, h))
     frame.fill((16, 16, 22))
-    cell_w, cell_h = int(w * 0.6), int(h * 0.62)
+    # Under half the screen each, so the two corner photos clear the centre and
+    # the middle one only laps their corners.
+    cell_w, cell_h = int(w * 0.46), int(h * 0.48)
     border = max(4, w // 220)
     margin = max(8, w // 80)
-    # Pick a diagonal for variety: top-left+bottom-right, or top-right+bottom-left.
-    corners = random.choice((("tl", "br"), ("tr", "bl")))
-    for idx in range(min(2, len(paths))):
+
+    def place(img):
+        iw, ih = img.get_size()
+        pygame.draw.rect(frame, (240, 240, 240),
+                         (px - border, py - border, iw + 2 * border, ih + 2 * border))
+        frame.blit(img, (px, py))
+
+    for idx in range(min(3, len(paths))):
         try:
             img = _scaled_image(paths[idx], cell_w, cell_h)
             if not img:
                 continue
             img = _maybe_effect(img, config)
             iw, ih = img.get_size()
-            corner = corners[idx]
-            if corner == "tl":
-                x, y = margin, margin
-            elif corner == "tr":
-                x, y = w - iw - margin, margin
-            elif corner == "bl":
-                x, y = margin, h - ih - margin
-            else:  # br
-                x, y = w - iw - margin, h - ih - margin
-            pygame.draw.rect(frame, (240, 240, 240),
-                             (x - border, y - border, iw + 2 * border, ih + 2 * border))
-            frame.blit(img, (x, y))
+            if idx == 0:                       # top-left corner
+                px, py = margin, margin
+            elif idx == 1:                     # centre
+                px, py = (w - iw) // 2, (h - ih) // 2
+            else:                              # bottom-right corner
+                px, py = w - iw - margin, h - ih - margin
+            place(img)
         except Exception as e:
             log_error(f"Cascade render failed for {paths[idx]}: {e}")
     try:
