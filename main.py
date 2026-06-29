@@ -438,6 +438,7 @@ def _sweep_clocks(targets, config, seconds):
         for t in targets:
             show_clock_with_quote(t, config)
         try:
+            pygame.event.pump()           # peek alone doesn't poll the OS queue
             if pygame.event.peek(interrupt):
                 return
         except Exception:
@@ -453,6 +454,7 @@ def _responsive_sleep(seconds):
     end = time.time() + max(0.0, seconds)
     while time.time() < end:
         try:
+            pygame.event.pump()           # peek alone doesn't poll the OS queue
             if pygame.event.peek(interrupt):
                 return  # leave it queued; the top of the loop handles it
         except Exception:
@@ -747,6 +749,13 @@ def main():
                 if current_ts - last_email_check > email_check_interval:
                     check_for_new_emails(config, screens)
                     last_email_check = current_ts
+                # Keep pulling from Drive overnight (background; folds into the
+                # rotation when the display wakes in the morning).
+                if (config.get("cloud_backup_enabled", False)
+                        and current_ts - last_drive_sync > drive_sync_interval
+                        and not is_syncing()):
+                    start_background_sync(config)
+                    last_drive_sync = current_ts
                 continue
 
             # Daytime: if night mode blanked the HDMI, power it back on.
