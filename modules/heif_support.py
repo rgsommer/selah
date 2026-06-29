@@ -14,3 +14,12 @@ try:
     HEIF_OK = True
 except Exception:
     HEIF_OK = False
+
+# Allow very large scans (e.g. 195-megapixel flatbed scans) instead of raising
+# PIL's DecompressionBomb error. This is a trusted local library; the loader and
+# downscaler cap the working size, so memory stays bounded.
+try:
+    from PIL import Image as _PILImage
+    _PILImage.MAX_IMAGE_PIXELS = None
+except Exception:
+    pass
