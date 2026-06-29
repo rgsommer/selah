@@ -55,6 +55,7 @@ DEFAULT_CONFIG = {
     "calendar_use_all_calendars": True,
     "info_panel_split": True,
     "info_panel_side": "right",
+    "manual_panel_seconds": 120,
     "moon_phase_enabled": True,
     "night_screen_off": False,
     "prevent_screen_sleep": True,

@@ -638,6 +638,17 @@ def main():
                                                      f"Approved {n} pending sender(s)")
                         except Exception as e:
                             log_error(f"Approve-all failed: {e}")
+                    elif event.key == pygame.K_F6:
+                        # Manually show the info panel: agenda -> 5-day -> off.
+                        nxt = {None: "agenda", "agenda": "forecast",
+                               "forecast": None}[state.get("manual_panel")]
+                        state["manual_panel"] = nxt
+                        state["manual_panel_until"] = current_ts + config.get(
+                            "manual_panel_seconds", 120)
+                        show_toast_if_needed(screens, config,
+                                             {"agenda": "Agenda",
+                                              "forecast": "5-day forecast",
+                                              None: "Panel hidden"}[nxt])
                     elif event.key == pygame.K_SPACE:
                         # Play / pause the slideshow.
                         state["paused"] = not state.get("paused", False)
@@ -836,6 +847,13 @@ def main():
                     panel_kind = "forecast"
                 elif config.get("calendar_display_enabled", False) and agenda_in_window(config):
                     panel_kind = "agenda"
+
+            # F6 manual override wins, and works even outside scheduled windows.
+            manual = state.get("manual_panel")
+            if manual and current_ts < state.get("manual_panel_until", 0):
+                panel_kind = manual
+            elif manual:
+                state["manual_panel"] = None  # expired
 
             if active and panel_kind:
                 side = config.get("info_panel_side", "right")
