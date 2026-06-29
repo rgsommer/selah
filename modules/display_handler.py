@@ -423,6 +423,9 @@ def pick_layout_mode(config):
         return "single"
 
 
+import modules.heif_support  # noqa: F401  (registers HEIC/HEIF with PIL)
+
+
 def _load_surface(image_path):
     """Load an image as a pygame Surface, honoring EXIF orientation.
 

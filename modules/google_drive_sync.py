@@ -35,6 +35,7 @@ except ImportError:
     GOOGLE_AVAILABLE = False
 
 from modules.logger import log_error
+import modules.heif_support  # noqa: F401  (registers HEIC/HEIF with PIL)
 
 # If modifying scopes, delete token.json so the user re-authorizes.
 SCOPES = [
@@ -46,6 +47,8 @@ SCOPES = [
 IMAGE_MIMES = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
 }
 VIDEO_MIMES = {
     "video/mp4": ".mp4",
@@ -53,7 +56,7 @@ VIDEO_MIMES = {
     "video/quicktime": ".mov",
 }
 ALL_MEDIA_MIMES = {**IMAGE_MIMES, **VIDEO_MIMES}
-_IMAGE_EXTS = (".jpg", ".jpeg", ".png")
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".heic", ".heif")
 
 SYNC_STATE_FILE = "drive_sync_state.json"
 
@@ -91,8 +94,11 @@ def _maybe_downscale(path, config):
                 return  # already small enough
             scale = max_edge / float(max(w, h))
             im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
-            if p.lower().endswith(".png"):
+            lp = p.lower()
+            if lp.endswith(".png"):
                 im.save(p, optimize=True)
+            elif lp.endswith((".heic", ".heif")):
+                im.save(p, quality=85)               # keep HEIF format (pillow-heif)
             else:
                 im.convert("RGB").save(p, "JPEG", quality=85, optimize=True)
     except Exception as e:

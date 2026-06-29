@@ -11,7 +11,7 @@ DEFAULT_CONFIG = {
     "landscape_dir": "media/landscape",
     "art_dir": "media/art",
     "display_dir": "media/display",
-    "valid_extensions": [".jpg", ".jpeg", ".png", ".mp4", ".avi", ".mov"],
+    "valid_extensions": [".jpg", ".jpeg", ".png", ".heic", ".heif", ".mp4", ".avi", ".mov"],
     "rotate_interval": 10,
     "manual_navigation_pause": 60,
     "layout_variety_enabled": True,

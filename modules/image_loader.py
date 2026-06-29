@@ -12,6 +12,7 @@ import json
 import random
 from pathlib import Path
 from modules.logger import log_error
+import modules.heif_support  # noqa: F401  (registers HEIC/HEIF with PIL)
 
 try:
     from PIL import Image
@@ -144,7 +145,7 @@ def get_images_and_videos(config):
         landscape_by_folder = {}
         valid_ext = [ext.lower() for ext in config.get("valid_extensions",
                      [".jpg", ".jpeg", ".png", ".mp4", ".avi", ".mov"])]
-        image_ext = [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"]
+        image_ext = [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".heic", ".heif"]
 
         # Guest/privacy mode: when on, hide files under any "private" folder.
         privacy_on = config.get("privacy_mode_enabled", False)

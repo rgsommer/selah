@@ -35,6 +35,8 @@ sudo apt install -y \
 # pip needs --break-system-packages on this dedicated appliance.
 pip3 install --break-system-packages --no-input google-api-python-client || true
 python3 -c "import qrcode" 2>/dev/null || pip3 install --break-system-packages --no-input qrcode || true
+# HEIC/HEIF (Apple photos) support for Pillow.
+python3 -c "import pillow_heif" 2>/dev/null || pip3 install --break-system-packages --no-input pillow-heif || true
 
 # Face recognition is heavy (compiles dlib) and optional — opt in with SELAH_FACE=1.
 if [ "${SELAH_FACE:-0}" = "1" ]; then
