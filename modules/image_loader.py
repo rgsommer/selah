@@ -46,10 +46,11 @@ def _save_orientation_cache():
         log_error(f"Failed to save orientation cache: {e}")
 
 
-def is_portrait(file_path):
-    """Determine if an image is portrait based on dimensions and EXIF orientation.
+def photo_dims(file_path):
+    """Return (is_portrait, long_edge_px) for an image, cached per file.
 
-    Results are cached so each file is only opened once.
+    long_edge_px == 0 means the file couldn't be decoded (corrupt, or e.g. a
+    HEIC misnamed .jpg); -1 means unknown (legacy cache / no PIL).
     """
     _load_orientation_cache()
 
@@ -60,11 +61,15 @@ def is_portrait(file_path):
     except Exception:
         cache_key = file_path
 
-    if cache_key in _orientation_cache:
-        return _orientation_cache[cache_key]
+    cached = _orientation_cache.get(cache_key)
+    if isinstance(cached, list) and len(cached) == 2:
+        return bool(cached[0]), int(cached[1])
+    if isinstance(cached, bool):          # legacy cache: portrait only
+        return cached, -1
 
     if not HAS_PIL:
-        return False
+        _orientation_cache[cache_key] = [False, -1]
+        return False, -1
     try:
         with Image.open(file_path) as img:
             width, height = img.size
@@ -77,12 +82,18 @@ def is_portrait(file_path):
                         width, height = height, width
             except (AttributeError, Exception):
                 pass
-            result = height > width
-            _orientation_cache[cache_key] = result
-            return result
+            portrait = height > width
+            long_edge = max(width, height)
+            _orientation_cache[cache_key] = [portrait, long_edge]
+            return portrait, long_edge
     except Exception:
-        _orientation_cache[cache_key] = False
-        return False
+        _orientation_cache[cache_key] = [False, 0]   # 0 = unreadable
+        return False, 0
+
+
+def is_portrait(file_path):
+    """True if an image is portrait (cached)."""
+    return photo_dims(file_path)[0]
 
 
 def _balanced_shuffle(files_by_folder):
@@ -138,6 +149,10 @@ def get_images_and_videos(config):
         # Guest/privacy mode: when on, hide files under any "private" folder.
         privacy_on = config.get("privacy_mode_enabled", False)
         private_tokens = [str(t).lower() for t in config.get("private_dirs", ["private"])]
+        # Skip junk images: undecodable files (corrupt / misnamed HEIC) and
+        # anything below min_photo_px on the long edge (placeholder/icon
+        # graphics like Drive's generic "?" file). 0 disables the size check.
+        min_px = int(config.get("min_photo_px", 0) or 0)
 
         def collect_files(folder, forced_list_by_folder=None, orientation=None):
             """Collect media files from a folder.
@@ -166,18 +181,23 @@ def get_images_and_videos(config):
                 else:
                     group_key = str(folder_path)
 
+                is_img = path.suffix.lower() in image_ext
+                if is_img:
+                    portrait, edge = photo_dims(filepath)
+                    if edge == 0:                       # corrupt / undecodable
+                        continue
+                    if min_px and 0 < edge < min_px:    # placeholder / icon
+                        continue
+
                 if orientation and forced_list_by_folder is not None:
                     forced_list_by_folder.setdefault(group_key, []).append(filepath)
+                elif is_img:
+                    bucket = portrait_by_folder if portrait else landscape_by_folder
+                    bucket.setdefault(group_key, []).append(filepath)
                 else:
-                    if path.suffix.lower() in image_ext:
-                        if is_portrait(filepath):
-                            portrait_by_folder.setdefault(group_key, []).append(filepath)
-                        else:
-                            landscape_by_folder.setdefault(group_key, []).append(filepath)
-                    else:
-                        # Videos go to both lists
-                        portrait_by_folder.setdefault(group_key, []).append(filepath)
-                        landscape_by_folder.setdefault(group_key, []).append(filepath)
+                    # Videos go to both lists
+                    portrait_by_folder.setdefault(group_key, []).append(filepath)
+                    landscape_by_folder.setdefault(group_key, []).append(filepath)
 
         media_folder = config.get("media_folder", "media")
 

@@ -41,6 +41,7 @@ DEFAULT_CONFIG = {
     "private_dirs": ["private"],
     "hide_blurry_enabled": False,
     "blur_threshold": 60,
+    "min_photo_px": 500,
     "health_watchdog_enabled": True,
     "disk_warn_percent": 10,
     "weekly_digest_enabled": False,
