@@ -50,6 +50,15 @@ def show_weather_if_scheduled(screens, config):
     weather_display_seconds. Times missed because the app started later are
     skipped, not replayed.
     """
+    if tick_forecast(config):
+        screen = screens.get("landscape") or screens.get("portrait")
+        if screen:
+            render_forecast_panel(screen, config)
+
+
+def tick_forecast(config):
+    """Arm the scheduled forecast at each configured time, and report whether
+    it should be on screen right now. Call once per loop."""
     global _show_until, _shown_slots
 
     now = datetime.datetime.now()
@@ -69,19 +78,21 @@ def show_weather_if_scheduled(screens, config):
         else:
             _shown_slots.add(slot)        # missed the window (late start) — skip
 
-    if time.time() < _show_until:
-        screen = screens.get("landscape") or screens.get("portrait")
-        if not screen:
-            return
-        # The scheduled showing is the 5-day forecast; fall back to the current
-        # conditions card if the forecast isn't available.
-        forecast = _get_forecast(config)
-        if forecast:
-            _render_forecast(screen, forecast, config)
-        else:
-            weather = _get_weather(config)
-            if weather:
-                _render_weather(screen, weather, config)
+    return time.time() < _show_until
+
+
+def render_forecast_panel(target, config):
+    """Draw the 5-day forecast (or the current-conditions card if no forecast)
+    filling `target`. Returns True if drawn."""
+    forecast = _get_forecast(config)
+    if forecast:
+        _render_forecast(target, forecast, config)
+        return True
+    weather = _get_weather(config)
+    if weather:
+        _render_weather(target, weather, config)
+        return True
+    return False
 
 
 def _status_text(config):

@@ -29,33 +29,35 @@ def _calendar_times(config):
     return [t for t in (str(x).strip() for x in times) if _parse_hhmm(t) is not None]
 
 
-def show_calendar_if_scheduled(screens, config):
-    """Show the agenda at each configured time of day.
-
-    Set calendar_times = ["06:00", "21:00"] for multiple showings (or
-    calendar_start_time for one). Each runs for calendar_duration_minutes
-    (default 3 min if unset). With no times configured it falls back to a
-    brief pass at :15 and :45.
-    """
+def agenda_in_window(config):
+    """True if the agenda should be on screen right now (per calendar_times /
+    calendar_duration_minutes, or the legacy :15/:45 pass)."""
     now = datetime.datetime.now()
     times = _calendar_times(config)
-
     if times:
         dur = int(config.get("calendar_duration_minutes", 0) or 0) or 3
-        in_window = False
         for t in times:
             hm = _parse_hhmm(t)
             start = now.replace(hour=hm[0], minute=hm[1], second=0, microsecond=0)
             if start <= now < start + datetime.timedelta(minutes=dur):
-                in_window = True
-                break
-        if not in_window:
-            return
-    else:
-        # Legacy: a quick pass at :15 and :45.
-        if now.minute not in (15, 45) or now.second > 30:
-            return
+                return True
+        return False
+    return now.minute in (15, 45) and now.second <= 30
 
+
+def render_agenda_panel(target, config):
+    """Draw the agenda filling `target` (a half-screen surface). Returns True
+    if drawn. Used by the split-screen info panel."""
+    events = _get_calendar_events(config)
+    _render_scrolling_calendar(target, events or [], config, fill=True)
+    return True
+
+
+def show_calendar_if_scheduled(screens, config):
+    """Full-screen overlay version (non-split mode): show the agenda at each
+    configured time of day as a right-side panel over the photo."""
+    if not agenda_in_window(config):
+        return
     events = _get_calendar_events(config)
     if events:
         for screen in screens.values():
@@ -165,8 +167,9 @@ def _event_when(start_str):
         return None, ""
 
 
-def _render_scrolling_calendar(screen, events, config):
-    """Render a Today / Tomorrow agenda as a right-side panel."""
+def _render_scrolling_calendar(screen, events, config, fill=False):
+    """Render a Today / Tomorrow agenda. As a right-side panel by default, or
+    filling the surface when fill=True (split-screen info panel)."""
     try:
         screen_w, screen_h = screen.get_size()
         today = datetime.date.today()
@@ -195,10 +198,16 @@ def _render_scrolling_calendar(screen, events, config):
                     lines.append(("event", (tl, summary)))
 
         line_h = font.get_linesize() + 8
-        panel_w = min(screen_w // 3, 460)
-        panel_h = min(len(lines) * line_h + 60, screen_h - 40)
-        x = screen_w - panel_w - 16
-        y = (screen_h - panel_h) // 2
+        if fill:                       # split-screen: fill the panel half
+            panel_w = screen_w - 24
+            panel_h = screen_h - 24
+            x = 12
+            y = 12
+        else:                          # overlay: right-side panel
+            panel_w = min(screen_w // 3, 460)
+            panel_h = min(len(lines) * line_h + 60, screen_h - 40)
+            x = screen_w - panel_w - 16
+            y = (screen_h - panel_h) // 2
 
         bg = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
         bg.fill((0, 0, 40, 190))

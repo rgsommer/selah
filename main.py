@@ -29,7 +29,9 @@ from modules.email_handler import check_for_new_emails, send_annual_invites
 from modules.logger import log_error
 from modules.toast import show_toast_if_needed
 from modules.verse_handler import show_verse_if_scheduled
-from modules.calendar_display import show_calendar_if_scheduled
+from modules.calendar_display import (
+    show_calendar_if_scheduled, agenda_in_window, render_agenda_panel,
+)
 from modules.motion_detector import detect_motion
 from modules.face_recognition_handler import prioritize_images
 from modules.quote_loader import show_clock_with_quote
@@ -39,7 +41,7 @@ from modules.sender_manager import show_sender_manager
 from modules.leaderboard import show_leaderboard
 from modules.weather_display import (
     show_weather_if_scheduled, show_status_line, show_weather_pill,
-    draw_status_line, draw_weather_pill,
+    draw_status_line, draw_weather_pill, tick_forecast, render_forecast_panel,
 )
 from modules.voice_control import process_voice_command
 from modules.theme_manager import apply_theme
@@ -393,6 +395,42 @@ def _draw_time_weather(screens, config, fade):
             pass
 
 
+def _render_screen_with_panel(screen_type, screen, portrait_files, landscape_files,
+                              state, config, media_log, is_single, current_ts,
+                              panel_kind, side):
+    """Split one screen: an info panel (agenda/forecast) on one half, the photo
+    slideshow rendered into the other half. Returns the photo half subsurface
+    (for overlays), or None on failure."""
+    w, h = screen.get_size()
+    half = w // 2
+    if side == "left":
+        panel_rect, photo_rect = (0, 0, half, h), (half, 0, w - half, h)
+    else:
+        photo_rect, panel_rect = (0, 0, half, h), (half, 0, w - half, h)
+    try:
+        photo_sub = screen.subsurface(photo_rect)
+        panel_sub = screen.subsurface(panel_rect)
+    except Exception as e:
+        log_error(f"Panel split failed: {e}")
+        _render_one_screen(screen_type, screen, portrait_files, landscape_files,
+                           state, config, media_log, is_single, current_ts)
+        return None
+    # Draw the panel first so it's already up while the photo half animates in;
+    # the photo render only touches its own half, so the panel stays put.
+    try:
+        panel_sub.fill((0, 0, 0))
+        if panel_kind == "forecast":
+            render_forecast_panel(panel_sub, config)
+        else:
+            render_agenda_panel(panel_sub, config)
+        pygame.display.flip()
+    except Exception as e:
+        log_error(f"Info panel render failed: {e}")
+    _render_one_screen(screen_type, photo_sub, portrait_files, landscape_files,
+                       state, config, media_log, is_single, current_ts)
+    return photo_sub
+
+
 def _draw_overlays(screens, config, fade=False):
     """Draw every overlay on top of the freshly rendered photo(s).
 
@@ -404,10 +442,13 @@ def _draw_overlays(screens, config, fade=False):
         show_toast_if_needed(screens, config)
         if config.get("verse_display_enabled", False):
             show_verse_if_scheduled(screens, config)
-        if config.get("calendar_display_enabled", False):
-            show_calendar_if_scheduled(screens, config)
-        if config.get("weather_enabled", False):
-            show_weather_if_scheduled(screens, config)
+        # When the split info panel is on, the agenda/forecast are rendered into
+        # half the screen by the main loop instead of as full-screen overlays.
+        if not config.get("info_panel_split", True):
+            if config.get("calendar_display_enabled", False):
+                show_calendar_if_scheduled(screens, config)
+            if config.get("weather_enabled", False):
+                show_weather_if_scheduled(screens, config)
         _draw_time_weather(screens, config, fade)
         if config.get("upload_qr_enabled", False):
             show_upload_qr_if_scheduled(screens, config)
@@ -765,6 +806,30 @@ def main():
             # In persist mode the band rides the transition itself, so the
             # post-render overlay pass draws it instantly (no separate fade-in).
             fade_band = not config.get("overlay_band_persist", True)
+
+            # ---- SPLIT INFO PANEL (agenda / 5-day forecast on one half) ----
+            # Arm/detect each loop so the schedule still fires; photos keep
+            # rotating (all layouts) on the other half during the window.
+            panel_kind = None
+            if config.get("info_panel_split", True):
+                if config.get("weather_enabled", False) and tick_forecast(config):
+                    panel_kind = "forecast"
+                elif config.get("calendar_display_enabled", False) and agenda_in_window(config):
+                    panel_kind = "agenda"
+
+            if active and panel_kind:
+                side = config.get("info_panel_side", "right")
+                photo_subs = {}
+                for t, s in photo_screens:
+                    psub = _render_screen_with_panel(
+                        t, s, portrait_files, landscape_files, state, config,
+                        media_log, is_single, current_ts, panel_kind, side)
+                    if psub is not None:
+                        photo_subs[t] = psub
+                if photo_subs:
+                    _draw_overlays(photo_subs, config, fade=fade_band)
+                time.sleep(rotate_interval)
+                continue
 
             if active and stagger:
                 # Staggered: render the first screen, then the rest a half-interval
