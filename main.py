@@ -649,6 +649,11 @@ def main():
                                              {"agenda": "Agenda",
                                               "forecast": "5-day forecast",
                                               None: "Panel hidden"}[nxt])
+                    elif event.key in (pygame.K_h, pygame.K_QUESTION) or event.unicode == "?":
+                        from modules.help_overlay import show_help
+                        target = screens.get("landscape") or screens.get("portrait")
+                        if target:
+                            show_help(target, config)
                     elif event.key == pygame.K_SPACE:
                         # Play / pause the slideshow.
                         state["paused"] = not state.get("paused", False)
