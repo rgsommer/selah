@@ -323,6 +323,8 @@ def show_config_gui(screen, config):
             ("privacy_mode_enabled", "Guest/Privacy Mode", "bool"),
             ("hide_blurry_enabled", "Hide Blurry Photos", "bool"),
             ("weekly_digest_enabled", "Weekly Digest Email", "bool"),
+            ("nudge_enabled", "Nudge Quiet Senders", "bool"),
+            ("nudge_inactive_weeks", "  Nudge After (weeks quiet)", "int"),
             ("health_watchdog_enabled", "Health Watchdog (disk)", "bool"),
             ("rotate_interval", "Rotate Interval (sec)", "int"),
 

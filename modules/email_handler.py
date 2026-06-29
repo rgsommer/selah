@@ -655,6 +655,116 @@ def send_annual_invites(config):
     print(f"[Selah] Sent {sent_count} annual invites for {current_year}")
 
 
+NUDGE_LOG_FILE = "nudge_log.json"
+
+NUDGE_SUBJECT = "{owner} would love a new photo on the family display"
+
+NUDGE_BODY = """\
+Hi {name},
+
+It's been a while since your last photo lit up {owner}. Share a favourite \
+memory — just reply to this email with a photo attached, and it'll appear on \
+the display.
+
+(Prefer not to get these reminders? Just reply and let us know.)
+
+- The Selah Family Display
+"""
+
+
+def _last_submission_by_email():
+    """Map sender email -> most recent submission datetime, from media_log."""
+    out = {}
+    try:
+        with open("media_log.json") as f:
+            log = json.load(f)
+    except Exception:
+        return out
+    for e in log:
+        addr = _extract_email(e.get("sender", "") or "")
+        ts = e.get("timestamp")
+        if not addr or not ts:
+            continue
+        try:
+            dt = datetime.datetime.fromisoformat(ts)
+        except Exception:
+            continue
+        if addr not in out or dt > out[addr]:
+            out[addr] = dt
+    return out
+
+
+def send_inactivity_nudges(config):
+    """Gently nudge approved senders who haven't sent a photo in a while.
+
+    Personalized, one-line CTA, throttled to once per nudge_inactive_weeks per
+    person (and at most one scan per day). Call from the main loop — it only
+    sends when due.
+    """
+    if not config.get("nudge_enabled", True):
+        return
+    owner = config.get("email_address", "")
+    if not owner or not config.get("email_password"):
+        return
+    senders = load_approved_senders()
+    if not senders:
+        return
+
+    now = datetime.datetime.now()
+    weeks = int(config.get("nudge_inactive_weeks", 4))
+    gap = datetime.timedelta(weeks=max(1, weeks))
+
+    try:
+        with open(NUDGE_LOG_FILE) as f:
+            nlog = json.load(f)
+    except Exception:
+        nlog = {}
+    if nlog.get("_last_run", "")[:10] == now.date().isoformat():
+        return  # already scanned today
+
+    owner_name = config.get("display_owner_name", "the family display")
+    last_sub = _last_submission_by_email()
+    sent = 0
+    for sender_email in senders:
+        if sender_email == owner:
+            continue
+        ls = last_sub.get(sender_email)
+        if ls is not None and (now - ls) < gap:
+            continue  # they've contributed recently — no nudge
+        last_nudge = nlog.get(sender_email)
+        if last_nudge:
+            try:
+                if (now - datetime.datetime.fromisoformat(last_nudge)) < gap:
+                    continue  # nudged recently
+            except Exception:
+                pass
+        name = sender_email.split("@")[0].replace(".", " ").replace("_", " ").title()
+        try:
+            body = NUDGE_BODY.replace("{name}", name).replace("{owner}", owner_name)
+            msg = MIMEText(body)
+            msg["Subject"] = NUDGE_SUBJECT.replace("{owner}", owner_name)
+            msg["From"] = owner
+            msg["To"] = sender_email
+            with smtplib.SMTP(config["smtp_server"], config["smtp_port"]) as server:
+                server.starttls()
+                server.login(owner, config["email_password"])
+                server.send_message(msg)
+            nlog[sender_email] = now.isoformat()
+            sent += 1
+            print(f"[Selah] Sent inactivity nudge to {sender_email}")
+        except Exception as e:
+            log_error(f"Failed to nudge {sender_email}: {e}")
+
+    nlog["_last_run"] = now.isoformat()
+    try:
+        with open(NUDGE_LOG_FILE, "w") as f:
+            json.dump(nlog, f, indent=2)
+    except Exception as e:
+        log_error(f"Failed to save nudge log: {e}")
+    if sent:
+        print(f"[Selah] Sent {sent} inactivity nudge(s)")
+
+
 def send_invitations(config, recipients=None):
     """Send the photo-submission invitation on demand (the "nudge" button).
 

@@ -25,7 +25,7 @@ from modules.display_handler import (
 from modules.image_loader import get_images_and_videos
 from modules.event_handler import handle_events
 from modules.time_manager import is_display_off, apply_timezone
-from modules.email_handler import check_for_new_emails, send_annual_invites
+from modules.email_handler import check_for_new_emails, send_annual_invites, send_inactivity_nudges
 from modules.logger import log_error
 from modules.toast import show_toast_if_needed
 from modules.verse_handler import show_verse_if_scheduled
@@ -838,6 +838,11 @@ def main():
                     send_annual_invites(config)
                 except Exception as e:
                     log_error(f"Annual invite check failed: {e}")
+                # Nudge senders who've gone quiet (self-throttles per person).
+                try:
+                    send_inactivity_nudges(config)
+                except Exception as e:
+                    log_error(f"Inactivity nudge check failed: {e}")
                 # Weekly digest email (self-throttles to once per week).
                 if config.get("weekly_digest_enabled", False):
                     try:
