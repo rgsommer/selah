@@ -739,17 +739,26 @@ def _guess_mime(file_path):
     return mime_map.get(ext, "application/octet-stream")
 
 
-def _collect_all_local_media(config):
-    """Collect media files for push: the shared_drive mirror folder only.
+def _push_source_dirs(config):
+    """Local folders that push uploads from. Defaults to the shared_drive
+    mirror; set drive_push_dirs (e.g. ["media/display"]) to push your library
+    up to Drive instead/as well. Paths mirror to Drive relative to the media
+    folder, so media/display/Birds -> Drive/display/Birds."""
+    dirs = config.get("drive_push_dirs") or [config.get("drive_pull_dir", "media/shared_drive")]
+    return [d for d in dirs if d]
 
-    media/shared_drive is the two-way mirror of the Drive source folder, so
-    push exports exactly what's there (preserving subfolders). The rest of the
-    local library (e.g. an rsync'd media/display) is local-only and is NOT
-    pushed, which also avoids it being re-imported by the recursive pull."""
-    shared_root = config.get("drive_pull_dir", "media/shared_drive")
+
+def _collect_all_local_media(config):
+    """Collect media files to push from the configured push source folder(s).
+
+    By default that's media/shared_drive (the two-way mirror). The rsync'd
+    library (media/display) is local-only unless you add it to drive_push_dirs.
+    The recursive pull's name-dedup keeps anything already local from looping
+    back, so pushing the library up is safe."""
     valid_exts = tuple(config.get("valid_extensions", [".jpg", ".jpeg", ".png", ".mp4", ".avi", ".mov"]))
     files = []
-    for path in Path(shared_root).rglob("*"):
-        if path.suffix.lower() in valid_exts and path.is_file():
-            files.append(str(path))
+    for root in _push_source_dirs(config):
+        for path in Path(root).rglob("*"):
+            if path.suffix.lower() in valid_exts and path.is_file():
+                files.append(str(path))
     return files
