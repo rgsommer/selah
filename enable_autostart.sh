@@ -8,8 +8,11 @@ cat > "$HOME/.config/autostart/selah.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Selah Display
-Exec=bash $DIR/run.sh
+Comment=Family photo frame
+# Small delay so both HDMI outputs are up before Selah grabs the screen.
+Exec=bash -c "sleep 8; bash $DIR/run.sh"
 X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
 EOF
 echo "Autostart ENABLED -> ~/.config/autostart/selah.desktop"
 echo "Selah will launch at the next login / reboot."
