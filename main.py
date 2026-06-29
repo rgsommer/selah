@@ -395,6 +395,56 @@ def _draw_time_weather(screens, config, fade):
             pass
 
 
+def _draw_night(screens, config):
+    """Draw the night display (portrait dark + moon) once and return the list of
+    clock target surfaces to keep refreshing for a sweeping second hand."""
+    targets = []
+    if config.get("night_portrait_off", True):
+        for stype, screen in screens.items():
+            if stype.startswith("portrait"):
+                screen.fill((0, 0, 0))
+            elif config.get("moon_phase_enabled", True):
+                w, h = screen.get_size()
+                half = w // 2
+                try:
+                    show_moon_phase(screen.subsurface((0, 0, half, h)), config)
+                    targets.append(screen.subsurface((half, 0, w - half, h)))
+                except Exception:
+                    targets.append(screen)
+            else:
+                targets.append(screen)
+    else:
+        for i, screen in enumerate(screens.values()):
+            if config.get("moon_phase_enabled", True) and i == 0:
+                show_moon_phase(screen, config)
+            else:
+                targets.append(screen)
+    try:
+        pygame.display.flip()
+    except Exception:
+        pass
+    return targets
+
+
+def _sweep_clocks(targets, config, seconds):
+    """Redraw the analog clock(s) a few times a second for `seconds` so the
+    second hand sweeps. The moon stays put (drawn once). Returns early on input."""
+    interrupt = (pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN)
+    end = time.time() + max(0.0, seconds)
+    if not targets:
+        _responsive_sleep(seconds)
+        return
+    while time.time() < end:
+        for t in targets:
+            show_clock_with_quote(t, config)
+        try:
+            if pygame.event.peek(interrupt):
+                return
+        except Exception:
+            pass
+        pygame.time.delay(200)   # ~5 fps — smooth enough for a sweep
+
+
 def _responsive_sleep(seconds):
     """Sleep up to `seconds`, but return the instant an input event is queued so
     arrows / spacebar / F-keys / touch act immediately instead of waiting out
@@ -688,36 +738,11 @@ def main():
                     # True dark: actually power off the HDMI (no backlight glow).
                     from modules.screen_power import screen_off
                     screen_off()
-                elif config.get("night_portrait_off", True):
-                    # Portrait screen goes dark (blanked); landscape shows the
-                    # moon phase + analog clock through the night.
-                    for stype, screen in screens.items():
-                        if stype.startswith("portrait"):
-                            screen.fill((0, 0, 0))
-                            continue
-                        if config.get("moon_phase_enabled", True):
-                            w, h = screen.get_size()
-                            half = w // 2
-                            try:
-                                show_moon_phase(screen.subsurface((0, 0, half, h)), config)
-                                show_clock_with_quote(screen.subsurface((half, 0, w - half, h)), config)
-                            except Exception:
-                                show_clock_with_quote(screen, config)
-                        else:
-                            show_clock_with_quote(screen, config)
-                    try:
-                        pygame.display.flip()  # commit the blanked portrait half
-                    except Exception:
-                        pass
+                    time.sleep(10)
                 else:
-                    # Dedicate one HDMI to a large moon phase (if enabled); the
-                    # rest show the analog clock + nightly quote.
-                    for i, screen in enumerate(screens.values()):
-                        if config.get("moon_phase_enabled", True) and i == 0:
-                            show_moon_phase(screen, config)
-                        else:
-                            show_clock_with_quote(screen, config)
-                time.sleep(10)
+                    # Draw the moon once, then sweep the clock(s) for ~10s.
+                    targets = _draw_night(screens, config)
+                    _sweep_clocks(targets, config, 10)
                 # Still check email during night mode
                 if current_ts - last_email_check > email_check_interval:
                     check_for_new_emails(config, screens)
