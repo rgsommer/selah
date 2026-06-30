@@ -696,6 +696,14 @@ def main():
             if config.get("special_days_enabled", False):
                 check_special_days(screens, config, state)
 
+            # Refresh moonrise/moonset once a day (background, self-throttling).
+            if config.get("moon_phase_enabled", True):
+                try:
+                    from modules.moon_times import refresh_moon_times
+                    refresh_moon_times(config)
+                except Exception:
+                    pass
+
             # On-this-day flashbacks — queue once each morning.
             _check_flashbacks(state, config, portrait_files, landscape_files, screens)
             # Sprinkle mode: release a memory into the queue every so often.

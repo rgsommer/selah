@@ -70,6 +70,7 @@ DEFAULT_CONFIG = {
     "moon_phase_enabled": True,
     "moon_photo": "",
     "moon_photo_brightness": 55,
+    "moon_times_enabled": True,
     "night_screen_off": False,
     "night_portrait_off": True,
     "prevent_screen_sleep": True,

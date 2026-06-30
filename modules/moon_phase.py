@@ -148,8 +148,19 @@ def show_moon_phase(screen, config):
         name_surf = big.render(f"{name}  -  {pct}% lit", True, (120, 102, 78))
         screen.blit(name_surf, name_surf.get_rect(center=(cx, cy + r + big.get_linesize())))
         time_surf = small.render(tstr, True, (110, 96, 74))
-        screen.blit(time_surf, time_surf.get_rect(
-            center=(cx, cy + r + big.get_linesize() + small.get_linesize() + 6)))
+        ty = cy + r + big.get_linesize() + small.get_linesize() + 6
+        screen.blit(time_surf, time_surf.get_rect(center=(cx, ty)))
+
+        # Moonrise / moonset, if fetched (met.no, daily background fetch).
+        try:
+            from modules.moon_times import get_cached
+            mt = get_cached()
+            if mt:
+                rise, sett = mt
+                rs = small.render(f"Rise {rise}    Set {sett}", True, (96, 86, 68))
+                screen.blit(rs, rs.get_rect(center=(cx, ty + small.get_linesize() + 4)))
+        except Exception:
+            pass
 
         try:
             pygame.display.flip()
