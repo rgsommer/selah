@@ -68,6 +68,8 @@ DEFAULT_CONFIG = {
     "info_panel_side": "right",
     "manual_panel_seconds": 120,
     "moon_phase_enabled": True,
+    "moon_photo": "",
+    "moon_photo_brightness": 55,
     "night_screen_off": False,
     "night_portrait_off": True,
     "prevent_screen_sleep": True,
