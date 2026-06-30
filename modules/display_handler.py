@@ -627,10 +627,12 @@ def _build_cascade_frame(screen, paths, config):
     total_w = max(xs[k] + imgs[k].get_width() for k in range(len(imgs)))
     total_h = max(ys[k] + imgs[k].get_height() for k in range(len(imgs)))
 
-    # Clamp: scale the whole stack down so nothing runs off the screen (leaving
-    # a margin for the white borders). Overlap proportions are preserved.
-    margin = max(border * 2, w // 80)
-    fit = min(1.0, (w - 2 * margin) / total_w, (h - 2 * margin) / total_h)
+    # Clamp: scale the whole stack (white borders included) to fit inside a
+    # safe-area margin, so it clears the white borders AND TV overscan, which
+    # crops the outer few %. Overlap proportions are preserved.
+    margin = max(border * 2, int(h * 0.05))           # ~5% safe area
+    avail_w, avail_h = w - 2 * margin, h - 2 * margin
+    fit = min(1.0, avail_w / (total_w + 2 * border), avail_h / (total_h + 2 * border))
     if fit < 1.0:
         imgs = [pygame.transform.smoothscale(
                     im, (max(1, int(im.get_width() * fit)),
