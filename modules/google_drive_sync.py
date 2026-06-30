@@ -250,6 +250,9 @@ def _pull_one_folder(service, folder_id, config, downloaded, new_files,
     new_files."""
     media_index = media_index or set()
     drive_root = Path(config.get("drive_pull_dir", "media/shared_drive"))
+    # Top-level Drive folders we never pull down — e.g. 'display', which is the
+    # Pi's own backup pushed up there. Avoids re-downloading our own backup.
+    skip_dirs = {str(d).lower() for d in config.get("drive_pull_skip_dirs", ["display"])}
 
     page_token = None
     while True:
@@ -267,6 +270,8 @@ def _pull_one_folder(service, folder_id, config, downloaded, new_files,
 
             # Recurse into subfolders, replicating the path under shared_drive.
             if mime_type == "application/vnd.google-apps.folder":
+                if not subpath and file_name.lower() in skip_dirs:
+                    continue  # don't pull our own backup (e.g. display/) back down
                 _pull_one_folder(service, file_info["id"], config, downloaded,
                                  new_files, media_index,
                                  os.path.join(subpath, file_name))

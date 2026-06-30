@@ -110,6 +110,7 @@ DEFAULT_CONFIG = {
     "drive_downscale_max_px": 2560,
     "drive_mirror_structure": True,
     "drive_pull_dir": "media/shared_drive",
+    "drive_pull_skip_dirs": ["display"],
     "shared_drive_granular": True,
     "drive_push_dirs": [],
     "family_folder_enabled": False,
