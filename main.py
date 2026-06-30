@@ -85,14 +85,37 @@ def _display_file(screen, file_path, config, file_date=None, caption=None):
         show_image(screen, file_path, config, file_date, caption)
 
 
+RECENT_FILE = "recent_shown.json"
+
+
 def _recent_store(state):
-    """Shared 'recently shown' memory (set for lookup + deque for ordering)."""
+    """Shared 'recently shown' memory (set for lookup + deque for ordering),
+    loaded from disk on first use so it survives restarts."""
     r = state.get("_recent")
     if r is None:
         from collections import deque
-        r = {"set": set(), "order": deque()}
+        order = []
+        try:
+            with open(RECENT_FILE) as f:
+                order = [p for p in json.load(f) if isinstance(p, str)]
+        except Exception:
+            order = []
+        r = {"set": set(order), "order": deque(order), "last_save": 0.0}
         state["_recent"] = r
     return r
+
+
+def _save_recent(state):
+    """Persist the recently-shown list (best-effort)."""
+    r = state.get("_recent")
+    if not r:
+        return
+    try:
+        with open(RECENT_FILE, "w") as f:
+            json.dump(list(r["order"]), f)
+        r["last_save"] = time.time()
+    except Exception as e:
+        log_error(f"Failed to save recent-shown list: {e}")
 
 
 def _recent_cap(config, total):
@@ -111,12 +134,18 @@ def _is_recent(state, path):
 def _mark_shown(state, paths, config, total):
     r = _recent_store(state)
     cap = _recent_cap(config, total)
+    changed = False
     for p in paths:
         if p not in r["set"]:
             r["set"].add(p)
             r["order"].append(p)
+            changed = True
     while len(r["order"]) > cap:
         r["set"].discard(r["order"].popleft())
+        changed = True
+    # Throttle disk writes to once every 30s.
+    if changed and time.time() - r.get("last_save", 0) > 30:
+        _save_recent(state)
 
 
 def _health_check(config):
@@ -1159,6 +1188,10 @@ def main():
         traceback.print_exc()
     finally:
         # Cleanup
+        try:
+            _save_recent(state)   # persist seen-history across the restart
+        except Exception:
+            pass
         try:
             from modules.motion_detector import cleanup
             cleanup()
