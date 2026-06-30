@@ -11,7 +11,8 @@ import threading
 
 from modules.logger import log_error
 
-_state = {"date": None, "rise": None, "set": None, "latlon": None}
+_state = {"date": None, "rise": None, "set": None,
+          "sunrise": None, "sunset": None, "latlon": None}
 _lock = threading.Lock()
 _thread = None
 
@@ -45,23 +46,34 @@ def _fmt(iso):
         return None
 
 
+def _endpoint(kind, lat, lon, today):
+    import requests
+    r = requests.get(f"https://api.met.no/weatherapi/sunrise/3.0/{kind}",
+                     params={"lat": round(lat, 4), "lon": round(lon, 4), "date": today},
+                     headers={"User-Agent": _UA}, timeout=12)
+    return r.json().get("properties", {})
+
+
 def _fetch(config, today):
     ll = _geocode(config)
     if not ll:
         return
     lat, lon = ll
+    upd = {"date": today}
     try:
-        import requests
-        r = requests.get("https://api.met.no/weatherapi/sunrise/3.0/moon",
-                         params={"lat": round(lat, 4), "lon": round(lon, 4), "date": today},
-                         headers={"User-Agent": _UA}, timeout=12)
-        props = r.json().get("properties", {})
-        rise = _fmt(props.get("moonrise", {}).get("time"))
-        sett = _fmt(props.get("moonset", {}).get("time"))
-        with _lock:
-            _state.update({"date": today, "rise": rise, "set": sett})
+        m = _endpoint("moon", lat, lon, today)
+        upd["rise"] = _fmt(m.get("moonrise", {}).get("time"))
+        upd["set"] = _fmt(m.get("moonset", {}).get("time"))
     except Exception as e:
         log_error(f"Moon times fetch failed: {e}")
+    try:
+        s = _endpoint("sun", lat, lon, today)
+        upd["sunrise"] = _fmt(s.get("sunrise", {}).get("time"))
+        upd["sunset"] = _fmt(s.get("sunset", {}).get("time"))
+    except Exception as e:
+        log_error(f"Sun times fetch failed: {e}")
+    with _lock:
+        _state.update(upd)
 
 
 def refresh_moon_times(config):
@@ -84,4 +96,12 @@ def get_cached():
     with _lock:
         if _state["rise"] or _state["set"]:
             return _state["rise"] or "—", _state["set"] or "—"
+    return None
+
+
+def get_sun():
+    """Return (sunrise, sunset) display strings, or None if not fetched yet."""
+    with _lock:
+        if _state["sunrise"] or _state["sunset"]:
+            return _state["sunrise"] or "—", _state["sunset"] or "—"
     return None

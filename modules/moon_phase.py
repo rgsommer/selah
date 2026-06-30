@@ -151,14 +151,19 @@ def show_moon_phase(screen, config):
         ty = cy + r + big.get_linesize() + small.get_linesize() + 6
         screen.blit(time_surf, time_surf.get_rect(center=(cx, ty)))
 
-        # Moonrise / moonset, if fetched (met.no, daily background fetch).
+        # Moon + sun rise/set, if fetched (met.no, daily background fetch).
         try:
-            from modules.moon_times import get_cached
+            from modules.moon_times import get_cached, get_sun
+            line_y = ty + small.get_linesize() + 4
             mt = get_cached()
             if mt:
-                rise, sett = mt
-                rs = small.render(f"Rise {rise}    Set {sett}", True, (96, 86, 68))
-                screen.blit(rs, rs.get_rect(center=(cx, ty + small.get_linesize() + 4)))
+                rs = small.render(f"Moon  {mt[0]} - {mt[1]}", True, (96, 86, 68))
+                screen.blit(rs, rs.get_rect(center=(cx, line_y)))
+                line_y += small.get_linesize() + 2
+            st = get_sun()
+            if st:
+                ss = small.render(f"Sun  {st[0]} - {st[1]}", True, (108, 96, 64))
+                screen.blit(ss, ss.get_rect(center=(cx, line_y)))
         except Exception:
             pass
 
