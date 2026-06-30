@@ -459,8 +459,7 @@ def _draw_night(screens, config):
     sunrise_img = None
     try:
         from modules import sunrise as _sunrise
-        if _sunrise.in_window(config, config.get("sunrise_window_minutes", 5)):
-            sunrise_img = _sunrise.pick(config)
+        sunrise_img = _sunrise.active_image(config)
     except Exception:
         pass
 
@@ -1072,8 +1071,7 @@ def main():
             if active:
                 try:
                     from modules import sunrise as _sunrise
-                    if _sunrise.in_window(config, config.get("sunrise_window_minutes", 5)):
-                        sunrise_img = _sunrise.pick(config)
+                    sunrise_img = _sunrise.active_image(config)
                 except Exception:
                     sunrise_img = None
 

@@ -411,6 +411,7 @@ def show_config_gui(screen, config):
             ("moon_phase_enabled", "Night Moon Phase", "bool"),
             ("night_info_screen", "  Moon/Sunrise Screen (landscape/portrait)", "str"),
             ("night_sunrise_enabled", "  Sunrise Photos at Sunrise", "bool"),
+            ("night_sunset_enabled", "  Sunset Photos at Sunset", "bool"),
             ("night_screen_off", "Night: Blank HDMI (true dark)", "bool"),
             ("calendar_display_enabled", "Daily Agenda (calendar)", "bool"),
             ("google_calendar_id", "  Calendar ID", "str"),

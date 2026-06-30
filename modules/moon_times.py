@@ -12,7 +12,8 @@ import threading
 from modules.logger import log_error
 
 _state = {"date": None, "rise": None, "set": None,
-          "sunrise": None, "sunset": None, "sunrise_dt": None, "latlon": None}
+          "sunrise": None, "sunset": None,
+          "sunrise_dt": None, "sunset_dt": None, "latlon": None}
 _lock = threading.Lock()
 _thread = None
 
@@ -69,12 +70,14 @@ def _fetch(config, today):
     try:
         s = _endpoint("sun", lat, lon, today)
         sr_iso = s.get("sunrise", {}).get("time")
+        ss_iso = s.get("sunset", {}).get("time")
         upd["sunrise"] = _fmt(sr_iso)
-        upd["sunset"] = _fmt(s.get("sunset", {}).get("time"))
-        try:
-            upd["sunrise_dt"] = datetime.datetime.fromisoformat(sr_iso).astimezone()
-        except Exception:
-            pass
+        upd["sunset"] = _fmt(ss_iso)
+        for k, iso in (("sunrise_dt", sr_iso), ("sunset_dt", ss_iso)):
+            try:
+                upd[k] = datetime.datetime.fromisoformat(iso).astimezone()
+            except Exception:
+                pass
     except Exception as e:
         log_error(f"Sun times fetch failed: {e}")
     with _lock:
@@ -116,3 +119,9 @@ def get_sunrise_dt():
     """Today's sunrise as a tz-aware datetime, or None if not fetched yet."""
     with _lock:
         return _state["sunrise_dt"]
+
+
+def get_sunset_dt():
+    """Today's sunset as a tz-aware datetime, or None if not fetched yet."""
+    with _lock:
+        return _state["sunset_dt"]

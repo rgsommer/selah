@@ -76,6 +76,8 @@ DEFAULT_CONFIG = {
     "night_info_screen": "landscape",
     "night_sunrise_enabled": True,
     "sunrise_dir": "sunrise",
+    "night_sunset_enabled": True,
+    "sunset_dir": "sunset",
     "sunrise_window_minutes": 5,
     "prevent_screen_sleep": True,
     "software_portrait_screen": "none",
