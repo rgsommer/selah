@@ -626,6 +626,19 @@ def _build_cascade_frame(screen, paths, config):
         ys.append(ys[-1] + int(ph * (1 - ov)))
     total_w = max(xs[k] + imgs[k].get_width() for k in range(len(imgs)))
     total_h = max(ys[k] + imgs[k].get_height() for k in range(len(imgs)))
+
+    # Clamp: scale the whole stack down so nothing runs off the screen (leaving
+    # a margin for the white borders). Overlap proportions are preserved.
+    margin = max(border * 2, w // 80)
+    fit = min(1.0, (w - 2 * margin) / total_w, (h - 2 * margin) / total_h)
+    if fit < 1.0:
+        imgs = [pygame.transform.smoothscale(
+                    im, (max(1, int(im.get_width() * fit)),
+                         max(1, int(im.get_height() * fit)))) for im in imgs]
+        xs = [int(x * fit) for x in xs]
+        ys = [int(y * fit) for y in ys]
+        total_w = max(xs[k] + imgs[k].get_width() for k in range(len(imgs)))
+        total_h = max(ys[k] + imgs[k].get_height() for k in range(len(imgs)))
     offx, offy = (w - total_w) // 2, (h - total_h) // 2
 
     for k in range(len(imgs)):
