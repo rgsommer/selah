@@ -1064,6 +1064,49 @@ def main():
             elif manual:
                 state["manual_panel"] = None  # expired
 
+            # ---- SUNRISE SPLIT (daytime sunrise window) ----
+            # During the +/-5 min sunrise window, split the screen: sunrise on
+            # the LEFT if the agenda/5-day panel is up (panel stays right), else
+            # sunrise on the RIGHT with photos on the left.
+            sunrise_img = None
+            if active:
+                try:
+                    from modules import sunrise as _sunrise
+                    if _sunrise.in_window(config, config.get("sunrise_window_minutes", 5)):
+                        sunrise_img = _sunrise.pick(config)
+                except Exception:
+                    sunrise_img = None
+
+            if active and sunrise_img:
+                photo_subs = {}
+                for t, s in photo_screens:
+                    w, h = s.get_size()
+                    half = w // 2
+                    try:
+                        left = s.subsurface((0, 0, half, h))
+                        right = s.subsurface((half, 0, w - half, h))
+                    except Exception:
+                        left = right = s
+                    if panel_kind:                       # sunrise left, panel right
+                        _blit_image_fill(left, sunrise_img)
+                        if panel_kind == "forecast":
+                            render_forecast_panel(right, config)
+                        else:
+                            render_agenda_panel(right, config)
+                    else:                                # photos left, sunrise right
+                        _blit_image_fill(right, sunrise_img)
+                        _render_one_screen(t, left, portrait_files, landscape_files,
+                                           state, config, media_log, is_single, current_ts)
+                        photo_subs[t] = left
+                try:
+                    pygame.display.flip()
+                except Exception:
+                    pass
+                if photo_subs:
+                    _draw_overlays(photo_subs, config, fade=fade_band)
+                _responsive_sleep(rotate_interval)
+                continue
+
             if active and panel_kind:
                 side = config.get("info_panel_side", "right")
                 photo_subs = {}
