@@ -53,7 +53,17 @@ def check_for_new_emails(config, screens):
                     addr = _extract_email(sender)
                     if addr:
                         add_nudge_optout(addr)
+                        _send_optout_confirmation(addr, config)
                         print(f"[Selah] {addr} opted out of reminders")
+                    continue
+
+                # Opt-in request ("start") — re-subscribe.
+                if _is_optin(subject, msg):
+                    addr = _extract_email(sender)
+                    if addr and addr.lower() in load_nudge_optout():
+                        remove_nudge_optout(addr)
+                        _send_optin_confirmation(addr, config)
+                        print(f"[Selah] {addr} re-subscribed to reminders")
                     continue
 
                 approved_senders = load_approved_senders()
@@ -693,6 +703,76 @@ def add_nudge_optout(email):
             json.dump(sorted(out), f, indent=2)
     except Exception as e:
         log_error(f"Failed to save nudge opt-out: {e}")
+
+
+def remove_nudge_optout(email):
+    """Re-subscribe an address (remove it from the opt-out list)."""
+    addr = (email or "").lower().strip()
+    out = load_nudge_optout()
+    if addr not in out:
+        return
+    out.discard(addr)
+    try:
+        with open(NUDGE_OPTOUT_FILE, "w") as f:
+            json.dump(sorted(out), f, indent=2)
+    except Exception as e:
+        log_error(f"Failed to update nudge opt-out: {e}")
+
+
+def _send_simple_email(to_email, subject, body, config):
+    """Send a plain-text email from the display account. Best-effort."""
+    owner = config.get("email_address", "")
+    if not owner or not config.get("email_password") or not to_email:
+        return
+    try:
+        msg = MIMEText(body)
+        msg["Subject"] = subject
+        msg["From"] = owner
+        msg["To"] = to_email
+        with smtplib.SMTP(config["smtp_server"], config["smtp_port"]) as server:
+            server.starttls()
+            server.login(owner, config["email_password"])
+            server.send_message(msg)
+    except Exception as e:
+        log_error(f"Failed to send email to {to_email}: {e}")
+
+
+def _send_optout_confirmation(to_email, config):
+    name = to_email.split("@")[0].replace(".", " ").replace("_", " ").title()
+    owner_name = config.get("display_owner_name", "the family display")
+    body = (f"Hi {name},\n\n"
+            f"You're unsubscribed — no more reminders from {owner_name}.\n\n"
+            f"You can still share photos anytime: just email them to "
+            f"{config.get('email_address','')}. And if you'd like reminders "
+            f"again, reply with \"start\".\n\n- The Selah Family Display\n")
+    _send_simple_email(to_email, "You're unsubscribed", body, config)
+
+
+def _send_optin_confirmation(to_email, config):
+    name = to_email.split("@")[0].replace(".", " ").replace("_", " ").title()
+    owner_name = config.get("display_owner_name", "the family display")
+    body = (f"Hi {name},\n\n"
+            f"You're back on the list — we'll send the occasional reminder to "
+            f"share a photo with {owner_name}. Reply \"stop\" anytime to opt "
+            f"out again.\n\n- The Selah Family Display\n")
+    _send_simple_email(to_email, "You're subscribed", body, config)
+
+
+def _is_optin(subject, msg):
+    """True if an incoming email asks to re-subscribe (no attachment + start)."""
+    text = (subject or "").lower()
+    try:
+        for part in msg.walk():
+            if part.get_content_disposition() == "attachment":
+                return False
+            if part.get_content_type() == "text/plain":
+                try:
+                    text += " " + part.get_payload(decode=True).decode(errors="replace").lower()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return text.strip() in ("start", "start.", "resubscribe", "subscribe")
 
 
 def _is_optout(subject, msg):
