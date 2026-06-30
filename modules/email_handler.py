@@ -5,7 +5,7 @@ import imaplib
 import smtplib
 import email
 from email.mime.text import MIMEText
-from email.utils import parsedate_to_datetime
+from email.utils import parsedate_to_datetime, parseaddr
 from pathlib import Path
 import re
 import datetime
@@ -71,9 +71,8 @@ def check_for_new_emails(config, screens):
                     _handle_unapproved_sender(sender, msg, config, screens)
                     continue
 
-                date = parse_subject_date(subject)
-                if not date:
-                    date = get_email_date(msg)
+                subject_date = parse_subject_date(subject)   # a greeting date, or None
+                date = subject_date or get_email_date(msg)
 
                 caption = ""
                 has_attachment = False
@@ -90,9 +89,21 @@ def check_for_new_emails(config, screens):
                         if filename and filename.lower().endswith(
                             tuple(config.get("valid_extensions", []))
                         ):
-                            file_path = save_attachment(part, config, date)
+                            file_path = save_attachment(part, config, sender)
                             if file_path:
                                 has_attachment = True
+                                # A dated greeting (date in the subject) still
+                                # gets scheduled to show on that day.
+                                if subject_date:
+                                    try:
+                                        from modules.scheduled_media import add_scheduled
+                                        add_scheduled(
+                                            file_path, subject_date.strftime("%m-%d"),
+                                            caption=caption,
+                                            recurring=config.get("email_greeting_recurring", True),
+                                            target_iso=subject_date.isoformat())
+                                    except Exception as e:
+                                        log_error(f"Greeting schedule failed: {e}")
                                 final_date = date or get_file_date(file_path)
                                 queue_media(file_path, final_date, caption, config)
                                 send_auto_reply(sender, config, final_date)
@@ -208,17 +219,21 @@ def extract_caption(body):
         return ""
 
 
-def save_attachment(part, config, date):
-    """Save email attachment to the appropriate media folder."""
+def _sender_folder(sender):
+    """A filesystem-safe folder name for a sender ('Laura Sommer' or local part)."""
+    name, addr = parseaddr(sender or "")
+    label = (name or "").strip() or (addr.split("@")[0] if addr else "")
+    label = re.sub(r"[^\w .\-]", "", label).strip().rstrip(".")
+    return label or "unknown"
+
+
+def save_attachment(part, config, sender=None):
+    """Save an email attachment under media/email/<sender>/ (folders by sender)."""
     try:
         filename = part.get_filename()
         if not filename:
             return None
-        folder = Path(config.get("media_folder", "media"))
-        if date:
-            folder = folder / str(date)
-        else:
-            folder = folder / "display"
+        folder = Path(config.get("email_dir", "media/email")) / _sender_folder(sender)
         folder.mkdir(parents=True, exist_ok=True)
 
         file_path = folder / filename

@@ -232,6 +232,9 @@ def get_images_and_videos(config):
                 collect_files(drive_pull_dir, orientation=None,
                               deep_group=config.get("shared_drive_granular", True))
 
+            # Emailed photos, grouped by sender (media/email/<sender>/).
+            collect_files(config.get("email_dir", "media/email"), orientation=None)
+
             # Collect dated folders (e.g., media/2025-05-10/)
             media_path = Path(media_folder)
             if media_path.exists():

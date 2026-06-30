@@ -11,6 +11,8 @@ DEFAULT_CONFIG = {
     "landscape_dir": "media/landscape",
     "art_dir": "media/art",
     "display_dir": "media/display",
+    "email_dir": "media/email",
+    "email_greeting_recurring": True,
     "valid_extensions": [".jpg", ".jpeg", ".png", ".heic", ".heif", ".mp4", ".avi", ".mov"],
     "rotate_interval": 10,
     "manual_navigation_pause": 60,
