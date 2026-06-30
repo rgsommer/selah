@@ -55,18 +55,17 @@ def photo_dims(file_path):
     """
     _load_orientation_cache()
 
-    # Check cache first (keyed by absolute path + mtime for invalidation)
+    # Cache key is versioned ("v2") so a logic change recomputes automatically,
+    # discarding stale/misclassified entries from older builds.
     try:
         mtime = os.path.getmtime(file_path)
-        cache_key = f"{file_path}|{mtime}"
+        cache_key = f"v2|{file_path}|{mtime}"
     except Exception:
-        cache_key = file_path
+        cache_key = f"v2|{file_path}"
 
     cached = _orientation_cache.get(cache_key)
     if isinstance(cached, list) and len(cached) == 2:
         return bool(cached[0]), int(cached[1])
-    if isinstance(cached, bool):          # legacy cache: portrait only
-        return cached, -1
 
     if not HAS_PIL:
         _orientation_cache[cache_key] = [False, -1]
@@ -74,14 +73,13 @@ def photo_dims(file_path):
     try:
         with Image.open(file_path) as img:
             width, height = img.size
-            # Check EXIF orientation tag for rotated photos
+            # Honor EXIF orientation, matching ImageOps.exif_transpose used at
+            # display time. Tags 5/6/7/8 all rotate 90 degrees -> swap w/h.
             try:
-                exif = img._getexif()
-                if exif:
-                    orientation = exif.get(274, 1)  # 274 = Orientation tag
-                    if orientation in (6, 8):  # Rotated 90 or 270 degrees
-                        width, height = height, width
-            except (AttributeError, Exception):
+                orientation = img.getexif().get(274, 1)  # 274 = Orientation
+                if orientation in (5, 6, 7, 8):
+                    width, height = height, width
+            except Exception:
                 pass
             portrait = height > width
             long_edge = max(width, height)
