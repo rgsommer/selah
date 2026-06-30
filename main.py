@@ -345,11 +345,16 @@ def _render_screen(screen, screen_type, files, state, config, media_log, multi_f
         state[screen_type]["index"] = (idx + 1) % len(files)
         return
 
-    # Tile/split modes: gather N images from the opposite-orientation pool so
-    # they fit the cells (skipping videos and recently-shown).
+    # Gather N images for the layout. Tile/split fit the opposite-orientation
+    # pool (portraits in a landscape screen's narrow columns); cascade stacks
+    # photos diagonally, so it needs same-orientation photos (landscape on the
+    # landscape screen) — opposite portraits would run off the top/bottom.
     need = layout_file_count(mode)
     skip_recent = config.get("recent_memory_enabled", True)
-    pool = multi_files if multi_files else files
+    if mode in ("tile3", "tile6", "split") and multi_files:
+        pool = multi_files
+    else:
+        pool = files
 
     def _eligible(allow_recent):
         return [f for f in pool if not f.lower().endswith(VIDEO_EXTS)
