@@ -51,7 +51,7 @@ from modules.google_drive_sync import start_background_sync, take_sync_result, i
 from modules.special_days import check_special_days, prioritize_for_today
 from modules.on_this_day import todays_flashbacks
 from modules.upload_qr import show_upload_qr_if_scheduled
-from modules.now_showing import set_current as _set_now_showing
+from modules.now_showing import set_current as _set_now_showing, get_current as _get_now_showing
 from modules.favorites import prioritize_favorites
 from modules.coming_up import show_coming_up_if_scheduled
 from modules.pending_badge import show_pending_badge
@@ -475,6 +475,26 @@ def _sweep_clocks(targets, config, seconds):
         pygame.time.delay(200)   # ~5 fps — smooth enough for a sweep
 
 
+def _delete_to_trash(path):
+    """Move a photo out of the library into a recoverable 'deleted/' folder.
+    Returns True on success. Kept out of media/ so it leaves the rotation."""
+    import shutil
+    try:
+        if not path or not os.path.exists(path):
+            return False
+        trash = os.path.join(os.getcwd(), "deleted")
+        os.makedirs(trash, exist_ok=True)
+        dest = os.path.join(trash, os.path.basename(path))
+        if os.path.exists(dest):
+            base, ext = os.path.splitext(os.path.basename(path))
+            dest = os.path.join(trash, f"{base}_{int(os.path.getmtime(path))}{ext}")
+        shutil.move(path, dest)
+        return True
+    except Exception as e:
+        log_error(f"Delete failed for {path}: {e}")
+        return False
+
+
 def _responsive_sleep(seconds):
     """Sleep up to `seconds`, but return the instant an input event is queued so
     arrows / spacebar / F-keys / touch act immediately instead of waiting out
@@ -732,6 +752,26 @@ def main():
                                              {"agenda": "Agenda",
                                               "forecast": "5-day forecast",
                                               None: "Panel hidden"}[nxt])
+                    elif event.key == pygame.K_DELETE:
+                        # Delete the current photo — PIN-protected.
+                        if config.get("delete_enabled", True):
+                            cur = _get_now_showing()
+                            target = screens.get("landscape") or screens.get("portrait")
+                            if cur and target:
+                                from modules.pin_prompt import prompt_pin
+                                entered = prompt_pin(target, "Enter delete code")
+                                if entered is None:
+                                    pass  # cancelled
+                                elif entered == str(config.get("delete_pin", "8719")):
+                                    if _delete_to_trash(cur):
+                                        portrait_files[:] = [f for f in portrait_files if f != cur]
+                                        landscape_files[:] = [f for f in landscape_files if f != cur]
+                                        state["nav_request"] = 1  # advance off the deleted pic
+                                        show_toast_if_needed(screens, config, "Photo deleted")
+                                    else:
+                                        show_toast_if_needed(screens, config, "Delete failed")
+                                else:
+                                    show_toast_if_needed(screens, config, "Wrong code")
                     elif event.key == pygame.K_F7:
                         # Show today's on-this-day memories now (queue them up).
                         try:

@@ -373,6 +373,8 @@ def show_config_gui(screen, config):
             ("show_file_name", "Show File Name", "bool"),
             ("show_file_date", "Show File Date", "bool"),
             ("show_caption", "Show Caption", "bool"),
+            ("delete_enabled", "Allow Delete (Del key)", "bool"),
+            ("delete_pin", "  Delete Code (PIN)", "str"),
             ("immediate_display", "Immediate Display", "bool"),
             ("notification_sound_enabled", "Notification Sound", "bool"),
             ("notification_duration", "Toast Duration (sec)", "int"),

@@ -19,6 +19,7 @@ _KEYS = [
     ("F5", "Approve all pending senders"),
     ("F6", "Agenda / 5-day forecast panel"),
     ("F7", "Show today's 'On this day' memories"),
+    ("Del", "Delete current photo (asks for code)"),
     ("H  or  ?", "This help"),
     ("Esc", "Quit"),
     ("Tap / swipe", "Previous / next photo"),

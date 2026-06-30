@@ -47,6 +47,8 @@ DEFAULT_CONFIG = {
     "hide_blurry_enabled": False,
     "blur_threshold": 60,
     "min_photo_px": 0,
+    "delete_enabled": True,
+    "delete_pin": "8719",
     "health_watchdog_enabled": True,
     "disk_warn_percent": 10,
     "weekly_digest_enabled": False,
