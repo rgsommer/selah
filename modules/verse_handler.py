@@ -9,23 +9,56 @@ _last_verse_date = None
 _cached_verse = None
 
 
-def show_verse_if_scheduled(screens, config):
-    """Show the Verse of the Day at the top of each hour (on the hour) for 30 seconds."""
-    global _last_verse_date, _cached_verse
+def _verse_times(config):
+    """Configured display times (HH:MM). Defaults to 22:00 (10 PM)."""
+    times = config.get("verse_times")
+    if isinstance(times, str):
+        times = [t.strip() for t in times.split(",") if t.strip()]
+    if not times:
+        times = [config.get("verse_time", "22:00")]
+    return times
 
+
+def is_verse_time(config):
+    """True during a configured verse window (used to show it at night too)."""
     now = datetime.datetime.now()
-    # Show verse at the top of each hour (minute 0, first 30 seconds)
-    if now.minute != 0 or now.second > 30:
-        return
+    cur = now.strftime("%H:%M")
+    secs = int(config.get("verse_display_seconds", 30))
+    return any(cur == t and now.second <= secs for t in _verse_times(config))
 
-    today = now.date()
-    if _last_verse_date != today:
+
+def get_cached_verse(config):
+    """Today's verse (cached), fetching once per day."""
+    global _last_verse_date, _cached_verse
+    today = datetime.datetime.now().date()
+    if _last_verse_date != today or _cached_verse is None:
         _cached_verse = _get_verse_of_the_day(today, config)
         _last_verse_date = today
+    return _cached_verse
 
-    if _cached_verse:
-        for screen in screens.values():
-            _render_verse(screen, _cached_verse)
+
+def _verse_screens(screens, config):
+    """Pick screens to show the verse on, per verse_screen (both/portrait/landscape)."""
+    pref = config.get("verse_screen", "both")
+    if pref == "both":
+        return list(screens.values())
+    sel = [s for t, s in screens.items() if t.startswith(pref)]
+    return sel or list(screens.values())
+
+
+def show_verse_if_scheduled(screens, config):
+    """Show the Verse of the Day at each configured time (default 10 PM) for a
+    short window, on the configured screen(s)."""
+    now = datetime.datetime.now()
+    cur = now.strftime("%H:%M")
+    secs = int(config.get("verse_display_seconds", 30))
+    in_window = any(cur == t and now.second <= secs for t in _verse_times(config))
+    if not in_window:
+        return
+    verse = get_cached_verse(config)
+    if verse:
+        for screen in _verse_screens(screens, config):
+            _render_verse(screen, verse)
 
 
 def _get_verse_of_the_day(today, config):

@@ -424,30 +424,64 @@ def _draw_time_weather(screens, config, fade):
             pass
 
 
+def _blit_image_fill(surface, path):
+    """Cover-scale an image to fill `surface` (centered, cropped)."""
+    try:
+        from modules.display_handler import _load_surface
+        img = _load_surface(path)
+        if not img:
+            return
+        sw, sh = surface.get_size()
+        iw, ih = img.get_size()
+        scale = max(sw / iw, sh / ih)
+        img = pygame.transform.smoothscale(img, (max(1, int(iw * scale)), max(1, int(ih * scale))))
+        surface.fill((0, 0, 0))
+        surface.blit(img, ((sw - img.get_width()) // 2, (sh - img.get_height()) // 2))
+    except Exception as e:
+        log_error(f"Sunrise image blit failed: {e}")
+
+
 def _draw_night(screens, config):
-    """Draw the night display (portrait dark + moon) once and return the list of
-    clock target surfaces to keep refreshing for a sweeping second hand."""
+    """Draw the night display once and return the list of clock target surfaces
+    to keep refreshing for a sweeping second hand.
+
+    The 'info' screen (night_info_screen) shows the moon — or a sunrise photo
+    near sunrise — alongside the clock; the other screen is blanked (portrait
+    off) or also shows a clock."""
     targets = []
-    if config.get("night_portrait_off", True):
-        for stype, screen in screens.items():
-            if stype.startswith("portrait"):
-                screen.fill((0, 0, 0))
+    photo_screens = [(t, s) for t, s in screens.items()
+                     if t.startswith("portrait") or t.startswith("landscape")]
+    pref = config.get("night_info_screen", "landscape")
+    info_t = next((t for t, _ in photo_screens if t.startswith(pref)),
+                  photo_screens[0][0] if photo_screens else None)
+
+    # Sunrise photo takes the moon's place during the sunrise window.
+    sunrise_img = None
+    try:
+        from modules import sunrise as _sunrise
+        if _sunrise.in_window(config, config.get("sunrise_window_minutes", 5)):
+            sunrise_img = _sunrise.pick(config)
+    except Exception:
+        pass
+
+    for stype, screen in screens.items():
+        if stype == info_t:
+            w, h = screen.get_size()
+            half = w // 2
+            try:
+                left = screen.subsurface((0, 0, half, h))
+                right = screen.subsurface((half, 0, w - half, h))
+            except Exception:
+                left = right = screen
+            if sunrise_img:
+                _blit_image_fill(left, sunrise_img)
             elif config.get("moon_phase_enabled", True):
-                w, h = screen.get_size()
-                half = w // 2
-                try:
-                    show_moon_phase(screen.subsurface((0, 0, half, h)), config)
-                    targets.append(screen.subsurface((half, 0, w - half, h)))
-                except Exception:
-                    targets.append(screen)
-            else:
-                targets.append(screen)
-    else:
-        for i, screen in enumerate(screens.values()):
-            if config.get("moon_phase_enabled", True) and i == 0:
-                show_moon_phase(screen, config)
-            else:
-                targets.append(screen)
+                show_moon_phase(left, config)
+            targets.append(right)
+        elif config.get("night_portrait_off", True):
+            screen.fill((0, 0, 0))
+        else:
+            targets.append(screen)
     try:
         pygame.display.flip()
     except Exception:
@@ -834,11 +868,23 @@ def main():
                     except Exception as e:
                         log_error(f"Night-mode motion check failed: {e}")
 
-                if config.get("night_screen_off", False):
+                verse_now = False
+                if config.get("verse_display_enabled", False):
+                    try:
+                        from modules.verse_handler import is_verse_time, show_verse_if_scheduled
+                        verse_now = is_verse_time(config)
+                    except Exception:
+                        verse_now = False
+
+                if config.get("night_screen_off", False) and not verse_now:
                     # True dark: actually power off the HDMI (no backlight glow).
                     from modules.screen_power import screen_off
                     screen_off()
                     time.sleep(10)
+                elif verse_now:
+                    # Verse of the day at its scheduled night time, on its screen(s).
+                    show_verse_if_scheduled(screens, config)
+                    time.sleep(3)
                 else:
                     # Draw the moon once, then sweep the clock(s) for ~10s.
                     targets = _draw_night(screens, config)

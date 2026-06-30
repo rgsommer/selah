@@ -12,7 +12,7 @@ import threading
 from modules.logger import log_error
 
 _state = {"date": None, "rise": None, "set": None,
-          "sunrise": None, "sunset": None, "latlon": None}
+          "sunrise": None, "sunset": None, "sunrise_dt": None, "latlon": None}
 _lock = threading.Lock()
 _thread = None
 
@@ -68,8 +68,13 @@ def _fetch(config, today):
         log_error(f"Moon times fetch failed: {e}")
     try:
         s = _endpoint("sun", lat, lon, today)
-        upd["sunrise"] = _fmt(s.get("sunrise", {}).get("time"))
+        sr_iso = s.get("sunrise", {}).get("time")
+        upd["sunrise"] = _fmt(sr_iso)
         upd["sunset"] = _fmt(s.get("sunset", {}).get("time"))
+        try:
+            upd["sunrise_dt"] = datetime.datetime.fromisoformat(sr_iso).astimezone()
+        except Exception:
+            pass
     except Exception as e:
         log_error(f"Sun times fetch failed: {e}")
     with _lock:
@@ -105,3 +110,9 @@ def get_sun():
         if _state["sunrise"] or _state["sunset"]:
             return _state["sunrise"] or "—", _state["sunset"] or "—"
     return None
+
+
+def get_sunrise_dt():
+    """Today's sunrise as a tz-aware datetime, or None if not fetched yet."""
+    with _lock:
+        return _state["sunrise_dt"]

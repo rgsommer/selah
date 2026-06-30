@@ -45,3 +45,6 @@ quality_cache.json
 digest_log.json
 scheduled_media.json
 moon.jpg
+sunrise/*.jpg
+sunrise/*.jpeg
+sunrise/*.png

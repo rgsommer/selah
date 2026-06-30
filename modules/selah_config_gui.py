@@ -409,6 +409,8 @@ def show_config_gui(screen, config):
             ("on_time", "Photos Start (morning HH:MM)", "str"),
             ("off_time", "Photos Stop (night HH:MM)", "str"),
             ("moon_phase_enabled", "Night Moon Phase", "bool"),
+            ("night_info_screen", "  Moon/Sunrise Screen (landscape/portrait)", "str"),
+            ("night_sunrise_enabled", "  Sunrise Photos at Sunrise", "bool"),
             ("night_screen_off", "Night: Blank HDMI (true dark)", "bool"),
             ("calendar_display_enabled", "Daily Agenda (calendar)", "bool"),
             ("google_calendar_id", "  Calendar ID", "str"),
@@ -436,6 +438,8 @@ def show_config_gui(screen, config):
 
             # --- Features ---
             ("verse_display_enabled", "Verse Display", "bool"),
+            ("verse_time", "  Verse Time (HH:MM)", "str"),
+            ("verse_screen", "  Verse Screen (both/landscape/portrait)", "str"),
             ("enable_face_recognition", "Face Recognition", "bool"),
             ("motion_detection_enabled", "Motion Detection", "bool"),
             ("motion_triggered_slideshow", "Motion Slideshow", "bool"),
