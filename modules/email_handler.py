@@ -48,6 +48,14 @@ def check_for_new_emails(config, screens):
                 if _is_approval_reply(subject, msg, config):
                     continue
 
+                # Opt-out request ("stop" / "unsubscribe" with no photo).
+                if _is_optout(subject, msg):
+                    addr = _extract_email(sender)
+                    if addr:
+                        add_nudge_optout(addr)
+                        print(f"[Selah] {addr} opted out of reminders")
+                    continue
+
                 approved_senders = load_approved_senders()
                 if approved_senders and not any(s in sender for s in approved_senders):
                     _handle_unapproved_sender(sender, msg, config, screens)
@@ -620,10 +628,11 @@ def send_annual_invites(config):
     if not owner or not config.get("email_password"):
         return
 
+    optout = load_nudge_optout()
     sent_count = 0
     for sender_email in senders:
-        # Skip the system's own email
-        if sender_email == owner:
+        # Skip the system's own email and anyone who opted out.
+        if sender_email == owner or sender_email.lower() in optout:
             continue
 
         # Derive a friendly name from the email
@@ -656,8 +665,59 @@ def send_annual_invites(config):
 
 
 NUDGE_LOG_FILE = "nudge_log.json"
+NUDGE_OPTOUT_FILE = "nudge_optout.json"
 
-NUDGE_SUBJECT = "{owner} would love a new photo on the family display"
+NUDGE_SUBJECT = "{name}, we'd love a new photo on the display"
+
+
+def load_nudge_optout():
+    """Set of lowercased emails that have opted out of reminders."""
+    try:
+        with open(NUDGE_OPTOUT_FILE) as f:
+            return {str(e).lower() for e in json.load(f)}
+    except Exception:
+        return set()
+
+
+def add_nudge_optout(email):
+    """Record an opt-out so we never nudge/invite this address again."""
+    addr = (email or "").lower().strip()
+    if not addr:
+        return
+    out = load_nudge_optout()
+    if addr in out:
+        return
+    out.add(addr)
+    try:
+        with open(NUDGE_OPTOUT_FILE, "w") as f:
+            json.dump(sorted(out), f, indent=2)
+    except Exception as e:
+        log_error(f"Failed to save nudge opt-out: {e}")
+
+
+def _is_optout(subject, msg):
+    """True if an incoming email is an opt-out request (no attachment + a
+    stop/unsubscribe phrase)."""
+    text = (subject or "").lower()
+    has_attach = False
+    try:
+        for part in msg.walk():
+            if part.get_content_disposition() == "attachment":
+                has_attach = True
+            if part.get_content_type() == "text/plain":
+                try:
+                    text += " " + part.get_payload(decode=True).decode(errors="replace").lower()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    if has_attach:
+        return False  # it's a photo submission, not an opt-out
+    keys = ("unsubscribe", "opt out", "opt-out", "no more reminder",
+            "stop reminder", "stop sending", "remove me")
+    if any(k in text for k in keys):
+        return True
+    return text.strip() in ("stop", "stop.")
 
 NUDGE_BODY = """\
 Hi {name},
@@ -666,7 +726,8 @@ It's been a while since your last photo lit up {owner}. Share a favourite \
 memory — just reply to this email with a photo attached, and it'll appear on \
 the display.
 
-(Prefer not to get these reminders? Just reply and let us know.)
+(Prefer not to get these reminders? Just reply with "stop" and we'll \
+take you off the list.)
 
 - The Selah Family Display
 """
@@ -724,9 +785,10 @@ def send_inactivity_nudges(config):
 
     owner_name = config.get("display_owner_name", "the family display")
     last_sub = _last_submission_by_email()
+    optout = load_nudge_optout()
     sent = 0
     for sender_email in senders:
-        if sender_email == owner:
+        if sender_email == owner or sender_email.lower() in optout:
             continue
         ls = last_sub.get(sender_email)
         if ls is not None and (now - ls) < gap:
@@ -742,7 +804,7 @@ def send_inactivity_nudges(config):
         try:
             body = NUDGE_BODY.replace("{name}", name).replace("{owner}", owner_name)
             msg = MIMEText(body)
-            msg["Subject"] = NUDGE_SUBJECT.replace("{owner}", owner_name)
+            msg["Subject"] = NUDGE_SUBJECT.replace("{name}", name).replace("{owner}", owner_name)
             msg["From"] = owner
             msg["To"] = sender_email
             with smtplib.SMTP(config["smtp_server"], config["smtp_port"]) as server:
