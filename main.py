@@ -275,11 +275,13 @@ def _nav_history(screen, screen_type, files, state, config, media_log, direction
             _render_screen(screen, screen_type, files, state, config, media_log)
 
 
-def _render_screen(screen, screen_type, files, state, config, media_log):
+def _render_screen(screen, screen_type, files, state, config, media_log, multi_files=None):
     """Render the next slideshow frame for one screen, with random layout variety,
     recording it so the arrows can browse back/forward through full renders.
 
-    Videos always play full-screen; recently-shown photos are skipped.
+    Videos always play full-screen; recently-shown photos are skipped. Multi-photo
+    layouts pull from multi_files (the opposite-orientation pool) so the cells fit:
+    a landscape screen's tall tile cells get portraits, and vice versa.
     """
     # Morning queue (scheduled greetings + on-this-day) plays first, one/frame.
     fbq = state.get("flashback_queue")
@@ -314,38 +316,33 @@ def _render_screen(screen, screen_type, files, state, config, media_log):
         state[screen_type]["index"] = (idx + 1) % len(files)
         return
 
-    # Tile/split modes: gather N images (skipping videos and recently-shown).
+    # Tile/split modes: gather N images from the opposite-orientation pool so
+    # they fit the cells (skipping videos and recently-shown).
     need = layout_file_count(mode)
     skip_recent = config.get("recent_memory_enabled", True)
-    picks, i, scanned = [], idx, 0
-    while len(picks) < need and scanned < len(files):
-        f = files[i % len(files)]
-        if not f.lower().endswith(VIDEO_EXTS) and not (skip_recent and _is_recent(state, f)):
-            picks.append(f)
-        i += 1
-        scanned += 1
-    if len(picks) < need:  # recency filtering starved us — allow recent images
-        picks, i, scanned = [], idx, 0
-        while len(picks) < need and scanned < len(files):
-            f = files[i % len(files)]
-            if not f.lower().endswith(VIDEO_EXTS):
-                picks.append(f)
-            i += 1
-            scanned += 1
+    pool = multi_files if multi_files else files
 
-    if len(picks) < need:
-        f = picks[0] if picks else first
-        frame = {"mode": "single", "picks": [f], "caption": None}
-        _push_history(state, screen_type, frame)
-        _render_frame(screen, frame, config, media_log)
-        _mark_shown(state, [f], config, len(files))
-        state[screen_type]["index"] = (idx + 1) % len(files)
-    else:
+    def _eligible(allow_recent):
+        return [f for f in pool if not f.lower().endswith(VIDEO_EXTS)
+                and (allow_recent or not (skip_recent and _is_recent(state, f)))]
+
+    cands = _eligible(False)
+    if len(cands) < need:
+        cands = _eligible(True)
+
+    if len(cands) >= need:
+        shuffle(cands)
+        picks = cands[:need]
         frame = {"mode": mode, "picks": picks, "caption": None}
         _push_history(state, screen_type, frame)
         _render_frame(screen, frame, config, media_log)
-        _mark_shown(state, picks, config, len(files))
-        state[screen_type]["index"] = i % len(files)
+        _mark_shown(state, picks, config, len(pool))
+    else:                                   # not enough — fall back to single
+        frame = {"mode": "single", "picks": [first], "caption": None}
+        _push_history(state, screen_type, frame)
+        _render_frame(screen, frame, config, media_log)
+        _mark_shown(state, [first], config, len(files))
+    state[screen_type]["index"] = (idx + 1) % len(files)
 
 
 def _render_one_screen(screen_type, screen, portrait_files, landscape_files,
@@ -355,8 +352,18 @@ def _render_one_screen(screen_type, screen, portrait_files, landscape_files,
         return
     if is_single:
         files = list(dict.fromkeys(portrait_files + landscape_files))
+        multi_files = files
     else:
-        files = portrait_files if screen_type.startswith("portrait") else landscape_files
+        portrait = screen_type.startswith("portrait")
+        files = portrait_files if portrait else landscape_files
+        # Multi-photo grids fit the opposite orientation; toggle off to keep
+        # same-orientation tiling.
+        if config.get("multi_opposite_orientation", True):
+            multi_files = landscape_files if portrait else portrait_files
+        else:
+            multi_files = files
+        if not multi_files:           # opposite pool empty — fall back to same
+            multi_files = files
     if not files:
         try:
             screen.fill((20, 20, 40))
@@ -367,7 +374,7 @@ def _render_one_screen(screen_type, screen, portrait_files, landscape_files,
         except Exception:
             pass
         return
-    _render_screen(screen, screen_type, files, state, config, media_log)
+    _render_screen(screen, screen_type, files, state, config, media_log, multi_files)
 
 
 def _fade_in_layer(screen, bg, layer, seconds):

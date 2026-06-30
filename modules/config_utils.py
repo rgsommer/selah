@@ -15,6 +15,7 @@ DEFAULT_CONFIG = {
     "rotate_interval": 10,
     "manual_navigation_pause": 60,
     "layout_variety_enabled": True,
+    "multi_opposite_orientation": True,
     "layout_fade_enabled": True,
     "transition_style": "random",
     "layout_weights": {"single": 50, "split": 20, "cascade": 20, "tile3": 30, "tile6": 20},
