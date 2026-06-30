@@ -594,40 +594,46 @@ def _build_split_frame(screen, paths, config):
 
 
 def _build_cascade_frame(screen, paths, config):
-    """3 photos: the outer two pinned to opposite corners (top-left and
-    bottom-right) so they never overlap each other, and the middle one centred,
-    overlapping each only at a corner (a stacked-snapshots look)."""
+    """3 photos cascading diagonally top-left -> centre -> bottom-right, each
+    overlapping the next by ~cascade_overlap and sized by cascade_size (fraction
+    of the screen). Later photos stack on top, and the outer two bleed a little
+    off the corners so the photos can be large."""
     w, h = screen.get_size()
     frame = pygame.Surface((w, h))
     frame.fill((16, 16, 22))
-    # Under half the screen each, so the two corner photos clear the centre and
-    # the middle one only laps their corners.
-    cell_w, cell_h = int(w * 0.46), int(h * 0.48)
+    size = float(config.get("cascade_size", 0.5))
+    ov = float(config.get("cascade_overlap", 0.10))
+    cell_w, cell_h = int(w * size), int(h * size)
     border = max(4, w // 220)
-    margin = max(8, w // 80)
 
-    def place(img):
-        iw, ih = img.get_size()
-        pygame.draw.rect(frame, (240, 240, 240),
-                         (px - border, py - border, iw + 2 * border, ih + 2 * border))
-        frame.blit(img, (px, py))
-
-    for idx in range(min(3, len(paths))):
+    imgs = []
+    for p in paths[:3]:
         try:
-            img = _scaled_image(paths[idx], cell_w, cell_h)
-            if not img:
-                continue
-            img = _maybe_effect(img, config)
-            iw, ih = img.get_size()
-            if idx == 0:                       # top-left corner
-                px, py = margin, margin
-            elif idx == 1:                     # centre
-                px, py = (w - iw) // 2, (h - ih) // 2
-            else:                              # bottom-right corner
-                px, py = w - iw - margin, h - ih - margin
-            place(img)
+            im = _scaled_image(p, cell_w, cell_h)
+            if im:
+                imgs.append(_maybe_effect(im, config))
         except Exception as e:
-            log_error(f"Cascade render failed for {paths[idx]}: {e}")
+            log_error(f"Cascade render failed for {p}: {e}")
+    if not imgs:
+        return frame
+
+    # Cascade each photo down-right from the previous, overlapping its corner by
+    # `ov` of the *actual* photo size, then centre the whole stack.
+    xs, ys = [0], [0]
+    for k in range(1, len(imgs)):
+        pw, ph = imgs[k - 1].get_size()
+        xs.append(xs[-1] + int(pw * (1 - ov)))
+        ys.append(ys[-1] + int(ph * (1 - ov)))
+    total_w = max(xs[k] + imgs[k].get_width() for k in range(len(imgs)))
+    total_h = max(ys[k] + imgs[k].get_height() for k in range(len(imgs)))
+    offx, offy = (w - total_w) // 2, (h - total_h) // 2
+
+    for k in range(len(imgs)):
+        iw, ih = imgs[k].get_size()
+        x, y = xs[k] + offx, ys[k] + offy
+        pygame.draw.rect(frame, (240, 240, 240),
+                         (x - border, y - border, iw + 2 * border, ih + 2 * border))
+        frame.blit(imgs[k], (x, y))
     try:
         from modules.theme_manager import draw_theme_border
         draw_theme_border(frame)

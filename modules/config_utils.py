@@ -20,6 +20,8 @@ DEFAULT_CONFIG = {
     "transition_style": "random",
     "layout_weights": {"single": 50, "split": 20, "cascade": 20, "tile3": 30, "tile6": 20},
     "multi_gutter_px": 0,
+    "cascade_size": 0.5,
+    "cascade_overlap": 0.10,
     "videos_enabled": True,
     "video_muted": True,
     "video_max_seconds": 60,
