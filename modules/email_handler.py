@@ -132,9 +132,18 @@ def check_for_new_emails(config, screens):
             break
 
         except Exception as e:
+            # Transient network/DNS blips aren't real failures — don't email the
+            # owner or toast a scary message for them; only genuine errors (bad
+            # credentials, etc.) are critical.
+            msg = str(e).lower()
+            transient = any(t in msg for t in (
+                "name resolution", "temporary failure", "temporarily",
+                "timed out", "timeout", "connection reset", "connection refused",
+                "network is unreachable", "broken pipe", "errno -3"))
+            is_last = attempt == max_retries - 1
             error_msg = f"Email check failed (attempt {attempt + 1}/{max_retries}): {e}"
-            log_error(error_msg, critical=(attempt == max_retries - 1), config=config)
-            if attempt == max_retries - 1:
+            log_error(error_msg, critical=(is_last and not transient), config=config)
+            if is_last and not transient:
                 try:
                     from modules.toast import queue_toast
                     queue_toast("Email check failed. Check credentials.")
