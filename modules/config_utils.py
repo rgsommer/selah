@@ -77,6 +77,7 @@ DEFAULT_CONFIG = {
     "moon_photo_brightness": 55,
     "moon_times_enabled": True,
     "night_screen_off": False,
+    "night_off_display_id": 7,
     "night_portrait_off": True,
     "night_info_screen": "landscape",
     "night_sunrise_enabled": True,

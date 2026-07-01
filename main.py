@@ -916,18 +916,20 @@ def main():
                     except Exception:
                         verse_now = False
 
-                if config.get("night_screen_off", False) and not verse_now:
-                    # True dark: actually power off the HDMI (no backlight glow).
-                    from modules.screen_power import screen_off
-                    screen_off()
-                    time.sleep(10)
-                elif verse_now:
+                if verse_now:
                     # Verse of the day at its scheduled night time, on its screen(s).
                     show_verse_if_scheduled(screens, config)
                     time.sleep(3)
                 else:
-                    # Draw the moon once, then sweep the clock(s) for ~10s.
+                    # Info screen shows the moon/clock; power off ONLY the
+                    # inactive screen's HDMI (true dark) if night_screen_off.
                     targets = _draw_night(screens, config)
+                    if config.get("night_screen_off", False):
+                        try:
+                            from modules.screen_power import output_power
+                            output_power(config.get("night_off_display_id", 7), False)
+                        except Exception:
+                            pass
                     _sweep_clocks(targets, config, 10)
                 # Still check email during night mode
                 if current_ts - last_email_check > email_check_interval:
@@ -942,10 +944,13 @@ def main():
                     last_drive_sync = current_ts
                 continue
 
-            # Daytime: if night mode blanked the HDMI, power it back on.
+            # Daytime: power the inactive HDMI back on if night mode turned it off.
             if config.get("night_screen_off", False):
-                from modules.screen_power import screen_on
-                screen_on()
+                try:
+                    from modules.screen_power import output_power
+                    output_power(config.get("night_off_display_id", 7), True)
+                except Exception:
+                    pass
 
             # ---- MOTION DETECTION ----
             if config.get("motion_triggered_slideshow", False):

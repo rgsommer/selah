@@ -24,6 +24,24 @@ def is_off():
     return _state["off"]
 
 
+_out_state = {}
+
+
+def output_power(display_id, on):
+    """Power a single HDMI output on/off via vcgencmd (firmware-level, so it
+    doesn't disturb the X/Wayland screen layout). display_id is the vcgencmd id
+    (Pi 4: HDMI-0 = 2, HDMI-1 = 7). Idempotent."""
+    try:
+        display_id = int(display_id)
+    except Exception:
+        return
+    if _out_state.get(display_id) == bool(on):
+        return
+    _run(f"vcgencmd display_power {1 if on else 0} {display_id}")
+    _out_state[display_id] = bool(on)
+    print(f"[Selah] HDMI display {display_id} -> {'on' if on else 'off'}")
+
+
 def prevent_sleep():
     """Stop the OS from blanking/sleeping the screens during the slideshow.
 
