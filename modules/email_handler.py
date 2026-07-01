@@ -99,10 +99,12 @@ def check_for_new_emails(config, screens):
                                 if subject_date:
                                     try:
                                         from modules.scheduled_media import add_scheduled
+                                        # Explicit year in the subject -> that year
+                                        # only; no year -> recurs every year.
+                                        recurring = not _subject_has_year(subject)
                                         add_scheduled(
                                             file_path, subject_date.strftime("%m-%d"),
-                                            caption=caption,
-                                            recurring=config.get("email_greeting_recurring", True),
+                                            caption=caption, recurring=recurring,
                                             target_iso=subject_date.isoformat())
                                     except Exception as e:
                                         log_error(f"Greeting schedule failed: {e}")
@@ -220,6 +222,11 @@ def _nth_weekday_of_month(ordinal, weekday, month, year):
     return datetime.date(year, mo, days[-1] if n == -1 else days[n - 1])
 
 
+def _subject_has_year(subject):
+    """True if the subject names a specific 4-digit year (=> one-time greeting)."""
+    return bool(re.search(r"\b(?:19|20)\d{2}\b", subject or ""))
+
+
 def _subject_caption(subject):
     """The subject line cleaned for use as the caption: drop Re:/Fwd: and the
     trailing date phrase (that's for scheduling, not the caption)."""
@@ -333,12 +340,11 @@ DID_YOU_KNOW = """
 — Did you know? —
 • There's a leaderboard! The more photos you send, the higher you climb.
 • Your SUBJECT line becomes the caption shown under your photo — so make it a good one.
-• Put a date in the subject and we'll automatically re-show your photo on that day,
-  year after year:
-      Happy Birthday, Liam Aug 9
-      Happy Mother's Day, 2nd Sunday of May
-      Merry Christmas 2026-12-25
-  Perfect for birthdays, anniversaries, and holidays.
+• Put a date in the subject and we'll automatically re-show your photo on that day:
+      Happy Birthday, Liam Aug 9          (recurs EVERY year)
+      Happy Mother's Day, 2nd Sunday of May   (recurs EVERY year)
+      Merry Christmas 2026-12-25          (that year ONLY — it has a year)
+  No year = every year (great for birthdays/anniversaries); add a year for a one-time show.
 
 Keep them coming — we love seeing your photos up on the display!
 - The Selah Family Display
