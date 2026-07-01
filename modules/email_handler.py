@@ -74,11 +74,13 @@ def check_for_new_emails(config, screens):
                 subject_date = parse_subject_date(subject)   # a greeting date, or None
                 date = subject_date or get_email_date(msg)
 
-                caption = ""
+                # The subject line is the caption shown under the photo; the
+                # email body is only a fallback when the subject is empty.
+                caption = _subject_caption(subject)
                 has_attachment = False
                 for part in msg.walk():
                     content_type = part.get_content_type()
-                    if content_type == "text/plain":
+                    if content_type == "text/plain" and not caption:
                         try:
                             body = part.get_payload(decode=True).decode(errors="replace")
                             caption = extract_caption(body)
@@ -185,7 +187,43 @@ def parse_subject_date(subject):
                     continue
         except Exception:
             pass
+    # Relative: "2nd Sunday of May", "last Monday of October" (Mother's Day etc.)
+    rel = re.search(
+        r"(1st|2nd|3rd|4th|5th|first|second|third|fourth|fifth|last)\s+"
+        r"(mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+of\s+"
+        r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*",
+        subject, re.I)
+    if rel:
+        try:
+            return _nth_weekday_of_month(rel.group(1), rel.group(2), rel.group(3),
+                                         datetime.datetime.now().year)
+        except Exception:
+            pass
     return None
+
+
+def _nth_weekday_of_month(ordinal, weekday, month, year):
+    """Date of the Nth given weekday in a month, e.g. 2nd Sunday of May."""
+    import calendar
+    ords = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3,
+            "fourth": 4, "4th": 4, "fifth": 5, "5th": 5, "last": -1}
+    wdays = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+    months = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+              "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
+    n = ords[ordinal.lower()]
+    wd = wdays[weekday.lower()[:3]]
+    mo = months[month.lower()[:3]]
+    days = [d for d in range(1, calendar.monthrange(year, mo)[1] + 1)
+            if datetime.date(year, mo, d).weekday() == wd]
+    if not days:
+        return None
+    return datetime.date(year, mo, days[-1] if n == -1 else days[n - 1])
+
+
+def _subject_caption(subject):
+    """The subject line, cleaned to serve as the photo caption (drop Re:/Fwd:)."""
+    s = re.sub(r"^\s*(re|fwd|fw)\s*:\s*", "", subject or "", flags=re.I).strip()
+    return s
 
 
 def get_email_date(msg):
@@ -273,12 +311,29 @@ def queue_media(file_path, date, caption, config):
         log_error(f"Failed to queue media: {e}", critical=False)
 
 
+DID_YOU_KNOW = """
+
+— Did you know? —
+• There's a leaderboard! The more photos you send, the higher you climb.
+• Your SUBJECT line becomes the caption shown under your photo — so make it a good one.
+• Put a date in the subject and we'll automatically re-show your photo on that day,
+  year after year:
+      Happy Birthday, Liam Aug 9
+      Happy Mother's Day, 2nd Sunday of May
+      Merry Christmas 2026-12-25
+  Perfect for birthdays, anniversaries, and holidays.
+
+Keep them coming — we love seeing your photos up on the display!
+- The Selah Family Display
+"""
+
+
 def send_auto_reply(sender, config, date):
     """Send auto-reply to contributor."""
     if not config.get("email_address") or not config.get("email_password"):
         return
     try:
-        message = get_custom_response(sender, date, config)
+        message = get_custom_response(sender, date, config) + DID_YOU_KNOW
         msg = MIMEText(message)
         msg["Subject"] = "Selah Submission Received"
         msg["From"] = config["email_address"]
