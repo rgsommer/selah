@@ -195,6 +195,9 @@ def _check_flashbacks(state, config, portrait_files, landscape_files, screens):
         for path, year in fb[:20]:
             memories.append((path, f"On this day, {year}"))
 
+    # Mark this hour as already-queued so the hourly re-queue doesn't double up.
+    state["last_greeting_hour"] = datetime.datetime.now().strftime("%Y-%m-%d %H")
+
     if not greetings and not memories:
         return
 
@@ -209,6 +212,31 @@ def _check_flashbacks(state, config, portrait_files, landscape_files, screens):
     else:
         state["flashback_queue"] = deque(greetings + memories)
         show_toast_if_needed(screens, config, "Today's special photos")
+
+
+def _maybe_hourly_greetings(state, config):
+    """Re-queue today's dated greetings at the top of each hour, so they recur
+    through the day (in turn with the rotation), not just first thing."""
+    if not config.get("greetings_hourly", True):
+        return
+    hour_key = datetime.datetime.now().strftime("%Y-%m-%d %H")
+    if state.get("last_greeting_hour") == hour_key:
+        return
+    state["last_greeting_hour"] = hour_key
+    try:
+        from modules.scheduled_media import todays_scheduled
+        items = todays_scheduled()
+    except Exception:
+        return
+    if not items:
+        return
+    from collections import deque
+    fq = state.get("flashback_queue")
+    if not isinstance(fq, deque):
+        fq = deque()
+        state["flashback_queue"] = fq
+    for it in items:
+        fq.append((it["path"], it.get("caption") or "A special greeting"))
 
 
 def _maybe_sprinkle(state, config, current_ts):
@@ -951,6 +979,9 @@ def main():
                     output_power(config.get("night_off_display_id", 7), True)
                 except Exception:
                     pass
+
+            # Re-queue today's greetings each hour so they recur through the day.
+            _maybe_hourly_greetings(state, config)
 
             # ---- MOTION DETECTION ----
             if config.get("motion_triggered_slideshow", False):

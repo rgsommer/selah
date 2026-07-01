@@ -340,7 +340,8 @@ DID_YOU_KNOW = """
 — Did you know? —
 • There's a leaderboard! The more photos you send, the higher you climb.
 • Your SUBJECT line becomes the caption shown under your photo — so make it a good one.
-• Put a date in the subject and we'll automatically re-show your photo on that day:
+• Put a date in the subject and we'll re-show your photo on that day — every hour,
+  in turn with everyone else's greetings:
       Happy Birthday, Liam Aug 9          (recurs EVERY year)
       Happy Mother's Day, 2nd Sunday of May   (recurs EVERY year)
       Merry Christmas 2026-12-25          (that year ONLY — it has a year)
@@ -374,8 +375,8 @@ def _base_reply(date):
     """The plain-language 'what happens next' line for the confirmation email."""
     if date:
         return ("Thank you! Your photo is saved and will appear on "
-                f"{date} — shown that day in turn, alongside everyone else's "
-                "greetings and that day's memories.")
+                f"{date} — shown that day every hour, in turn with everyone "
+                "else's greetings and that day's memories.")
     return ("Thank you! Your photo will appear on the display shortly, "
             "and again from time to time as the slideshow cycles.")
 
