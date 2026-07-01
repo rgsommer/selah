@@ -520,11 +520,37 @@ def _draw_night(screens, config):
     targets = []
     photo_screens = [(t, s) for t, s in screens.items()
                      if t.startswith("portrait") or t.startswith("landscape")]
-    pref = config.get("night_info_screen", "landscape")
-    info_t = next((t for t, _ in photo_screens if t.startswith(pref)),
-                  photo_screens[0][0] if photo_screens else None)
 
-    # Sunrise photo takes the moon's place during the sunrise window.
+    # night_off_mode: which screen's HDMI to power off at night (1/2/both/none).
+    off_mode = config.get("night_off_mode", "none")
+    off_idx = {"1": {0}, "2": {1}, "both": {0, 1}}.get(off_mode, set())
+    disp_ids = [config.get("screen1_display_id", 2), config.get("screen2_display_id", 7)]
+    try:
+        from modules.screen_power import output_power
+    except Exception:
+        output_power = None
+
+    # Power each screen's HDMI on/off per the mode, and note which are still on.
+    on_screens = []
+    for idx, (stype, screen) in enumerate(photo_screens):
+        did = disp_ids[idx] if idx < len(disp_ids) else None
+        if idx in off_idx:
+            if output_power and did is not None:
+                output_power(did, False)
+            screen.fill((0, 0, 0))
+        else:
+            if output_power and did is not None:
+                output_power(did, True)
+            on_screens.append((stype, screen))
+
+    if not on_screens:
+        try:
+            pygame.display.flip()
+        except Exception:
+            pass
+        return targets
+
+    # Sunrise/sunset photo takes the moon's place during its window.
     sunrise_img = None
     try:
         from modules import sunrise as _sunrise
@@ -532,7 +558,11 @@ def _draw_night(screens, config):
     except Exception:
         pass
 
-    for stype, screen in screens.items():
+    # Info screen (moon/clock) = an ON screen, preferring night_info_screen.
+    pref = config.get("night_info_screen", "landscape")
+    info_t = next((t for t, _ in on_screens if t.startswith(pref)), on_screens[0][0])
+
+    for stype, screen in on_screens:
         if stype == info_t:
             w, h = screen.get_size()
             half = w // 2
@@ -546,10 +576,8 @@ def _draw_night(screens, config):
             elif config.get("moon_phase_enabled", True):
                 show_moon_phase(left, config)
             targets.append(right)
-        elif config.get("night_portrait_off", True):
-            screen.fill((0, 0, 0))
         else:
-            targets.append(screen)
+            screen.fill((0, 0, 0))
     try:
         pygame.display.flip()
     except Exception:
@@ -829,7 +857,7 @@ def main():
                         return
                     elif event.key == pygame.K_F1:
                         target = screens.get("landscape") or screens.get("portrait")
-                        show_config_gui(target, config)
+                        show_config_gui(target, config, screens)
                         save_config(config, "display_config.json")
                         # Reload settings that may have changed
                         rotate_interval = config.get("rotate_interval", 10)
@@ -949,15 +977,9 @@ def main():
                     show_verse_if_scheduled(screens, config)
                     time.sleep(3)
                 else:
-                    # Info screen shows the moon/clock; power off ONLY the
-                    # inactive screen's HDMI (true dark) if night_screen_off.
+                    # _draw_night powers off screens per night_off_mode and
+                    # shows the moon/clock on whichever stays on.
                     targets = _draw_night(screens, config)
-                    if config.get("night_screen_off", False):
-                        try:
-                            from modules.screen_power import output_power
-                            output_power(config.get("night_off_display_id", 7), False)
-                        except Exception:
-                            pass
                     _sweep_clocks(targets, config, 10)
                 # Still check email during night mode
                 if current_ts - last_email_check > email_check_interval:
@@ -972,11 +994,12 @@ def main():
                     last_drive_sync = current_ts
                 continue
 
-            # Daytime: power the inactive HDMI back on if night mode turned it off.
-            if config.get("night_screen_off", False):
+            # Daytime: make sure both HDMIs are on if night mode turned one off.
+            if config.get("night_off_mode", "none") != "none":
                 try:
                     from modules.screen_power import output_power
-                    output_power(config.get("night_off_display_id", 7), True)
+                    output_power(config.get("screen1_display_id", 2), True)
+                    output_power(config.get("screen2_display_id", 7), True)
                 except Exception:
                     pass
 

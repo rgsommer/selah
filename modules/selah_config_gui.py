@@ -8,6 +8,35 @@ import pygame
 from modules.logger import log_error
 
 
+# Cycle-through options: key -> [(stored_value, display_label), ...]
+_CYCLE_OPTIONS = {
+    "night_off_mode": [("none", "Both On"), ("1", "1 Off"),
+                       ("2", "2 Off"), ("both", "Both Off")],
+}
+
+
+def _photo_screen_list(screens):
+    return [(t, s) for t, s in (screens or {}).items()
+            if t.startswith("portrait") or t.startswith("landscape")]
+
+
+def _draw_screen_ids(screens):
+    """Overlay a big '1' / '2' on each physical screen so the user can tell
+    which is which while configuring night/off options."""
+    for idx, (t, s) in enumerate(_photo_screen_list(screens)):
+        try:
+            w, h = s.get_size()
+            f = pygame.font.Font(None, max(120, h // 4))
+            num = f.render(str(idx + 1), True, (255, 230, 60))
+            r = num.get_rect(topright=(w - 24, 20))
+            bg = pygame.Surface((r.width + 34, r.height + 22), pygame.SRCALPHA)
+            bg.fill((0, 0, 0, 170))
+            s.blit(bg, (r.left - 17, r.top - 11))
+            s.blit(num, r)
+        except Exception:
+            pass
+
+
 def _load_special_days(config):
     """Load special_days.json (name-based birthdays/anniversaries/etc)."""
     path = config.get("special_days_file", "special_days.json")
@@ -353,7 +382,7 @@ def _manage_contacts(screen, config):
         clock.tick(30)
 
 
-def show_config_gui(screen, config):
+def show_config_gui(screen, config, screens=None):
     """Display an interactive configuration editor overlay.
 
     Allows editing key settings using keyboard input.
@@ -412,7 +441,7 @@ def show_config_gui(screen, config):
             ("night_info_screen", "  Moon/Sunrise Screen (landscape/portrait)", "str"),
             ("night_sunrise_enabled", "  Sunrise Photos at Sunrise", "bool"),
             ("night_sunset_enabled", "  Sunset Photos at Sunset", "bool"),
-            ("night_screen_off", "Night: Blank HDMI (true dark)", "bool"),
+            ("night_off_mode", "Night HDMI Off (Space to cycle)", "cycle"),
             ("calendar_display_enabled", "Daily Agenda (calendar)", "bool"),
             ("google_calendar_id", "  Calendar ID", "str"),
             ("calendar_start_time", "  Agenda Start (HH:MM)", "str"),
@@ -526,6 +555,12 @@ def show_config_gui(screen, config):
                 elif ftype == "csv":
                     val_str = ", ".join(str(x) for x in (config.get(key) or [])) or "(none)"
                     color = (255, 255, 255)
+                elif ftype == "cycle":
+                    opts = _CYCLE_OPTIONS.get(key, [])
+                    cur = config.get(key)
+                    lbl = next((l for v, l in opts if v == cur), str(cur))
+                    val_str = f"< {lbl} >"
+                    color = (120, 200, 255)
                 else:
                     val_str = str(config.get(key, ""))
                     color = (255, 255, 255)
@@ -540,6 +575,9 @@ def show_config_gui(screen, config):
                 True, (120, 160, 220)
             )
             screen.blit(footer, (20, screen_h - footer_h))
+
+            # Big 1 / 2 on each screen so the user can identify them.
+            _draw_screen_ids(screens)
 
             try:
                 pygame.display.flip()
@@ -588,7 +626,7 @@ def show_config_gui(screen, config):
                                 _manage_drive_folders(screen, config)
                             elif ftype == "contacts":
                                 _manage_contacts(screen, config)
-                            elif ftype not in ("bool", "layoutbool"):
+                            elif ftype not in ("bool", "layoutbool", "cycle"):
                                 # Only text/number fields are editable; toggles use Space.
                                 editing = True
                                 if ftype == "csv":
@@ -601,6 +639,12 @@ def show_config_gui(screen, config):
                                 config[key] = not config.get(key, False)
                             elif ftype == "layoutbool":
                                 _layout_toggle(config, key)
+                            elif ftype == "cycle":
+                                opts = [v for v, _ in _CYCLE_OPTIONS.get(key, [])]
+                                if opts:
+                                    cur = config.get(key, opts[0])
+                                    nxt = (opts.index(cur) + 1) % len(opts) if cur in opts else 0
+                                    config[key] = opts[nxt]
 
             clock.tick(30)
 

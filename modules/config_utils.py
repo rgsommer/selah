@@ -77,8 +77,9 @@ DEFAULT_CONFIG = {
     "moon_photo": "",
     "moon_photo_brightness": 55,
     "moon_times_enabled": True,
-    "night_screen_off": False,
-    "night_off_display_id": 7,
+    "night_off_mode": "none",       # none | 1 | 2 | both  (which HDMI off at night)
+    "screen1_display_id": 2,         # vcgencmd id for screen 1 (Pi4 HDMI-0 = 2)
+    "screen2_display_id": 7,         # vcgencmd id for screen 2 (Pi4 HDMI-1 = 7)
     "night_portrait_off": True,
     "night_info_screen": "landscape",
     "night_sunrise_enabled": True,
