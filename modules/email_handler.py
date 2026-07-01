@@ -370,16 +370,26 @@ def send_auto_reply(sender, config, date):
         log_error(f"Failed to send auto-reply: {e}", critical=False, config=config)
 
 
+def _base_reply(date):
+    """The plain-language 'what happens next' line for the confirmation email."""
+    if date:
+        return ("Thank you! Your photo is saved and will appear on "
+                f"{date} — shown that day in turn, alongside everyone else's "
+                "greetings and that day's memories.")
+    return ("Thank you! Your photo will appear on the display shortly, "
+            "and again from time to time as the slideshow cycles.")
+
+
 def get_custom_response(sender, date, config):
     """Get custom email response from templates."""
     try:
         if not config.get("custom_email_responses", False):
-            return f"Thank you for your submission! It is queued for {date or 'immediate display'}."
+            return _base_reply(date)
         try:
             with open("email_responses.json", "r") as f:
                 responses = json.load(f)
         except FileNotFoundError:
-            return f"Thank you for your submission! It is queued for {date or 'immediate display'}."
+            return _base_reply(date)
 
         for response in responses:
             condition = response.get("condition", "")
@@ -392,9 +402,9 @@ def get_custom_response(sender, date, config):
                 return msg_template
             if condition == "default":
                 return msg_template.replace("{date}", str(date or "immediate display"))
-        return "Thank you for your submission!"
+        return _base_reply(date)
     except Exception:
-        return f"Thank you for your submission! It is queued for {date or 'immediate display'}."
+        return _base_reply(date)
 
 
 def load_approved_senders(path="approved_senders.json"):
