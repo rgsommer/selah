@@ -221,9 +221,26 @@ def _nth_weekday_of_month(ordinal, weekday, month, year):
 
 
 def _subject_caption(subject):
-    """The subject line, cleaned to serve as the photo caption (drop Re:/Fwd:)."""
+    """The subject line cleaned for use as the caption: drop Re:/Fwd: and the
+    trailing date phrase (that's for scheduling, not the caption)."""
     s = re.sub(r"^\s*(re|fwd|fw)\s*:\s*", "", subject or "", flags=re.I).strip()
-    return s
+    # Strip a trailing date: ISO, "2nd Sunday of May", or "Aug 9".
+    patterns = [
+        r"\s*\d{4}-\d{2}-\d{2}\s*$",
+        r"\s*(?:1st|2nd|3rd|4th|5th|first|second|third|fourth|fifth|last)\s+"
+        r"(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+of\s+"
+        r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*$",
+        r"\s*(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+        r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+        r"\s+\d{1,2}(?:st|nd|rd|th)?\s*$",
+    ]
+    for pat in patterns:
+        stripped = re.sub(pat, "", s, flags=re.I)
+        if stripped != s:
+            s = stripped
+            break
+    s = s.rstrip(" ,-–—:").strip()
+    return s or re.sub(r"^\s*(re|fwd|fw)\s*:\s*", "", subject or "", flags=re.I).strip()
 
 
 def get_email_date(msg):
