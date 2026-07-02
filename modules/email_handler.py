@@ -97,13 +97,25 @@ def check_for_new_emails(config, screens):
                             break
 
                 # Photos are detected by content-type (catches inline + HEIC).
-                saved_paths = []
+                saved_paths = []     # newly written this pass
+                reply_photos = []    # every photo in the email (new OR already saved)
+                had_media = False
                 final_date = date
                 for filename, data in iter_media_parts(msg):
+                    had_media = True
                     file_path = save_media_bytes(data, filename, config, sender)
                     if not file_path:
+                        # Already on disk (a re-send, or a repull imported it).
+                        # We still acknowledge the sender, reusing the stored copy
+                        # for the reply thumbnail.
+                        existing = os.path.join(
+                            config.get("email_dir", "media/email"),
+                            _sender_folder(sender), filename)
+                        if os.path.exists(existing):
+                            reply_photos.append(existing)
                         continue
                     saved_paths.append(file_path)
+                    reply_photos.append(file_path)
                     # A dated greeting (date in the subject) is scheduled for
                     # its day; explicit year -> that year only, else every year.
                     if subject_date:
@@ -135,9 +147,10 @@ def check_for_new_emails(config, screens):
                         pass
                     log_media(file_path, sender, final_date, caption)
 
-                # One formatted reply per email, with all the thumbnails.
-                if saved_paths:
-                    send_auto_reply(sender, config, final_date, saved_paths)
+                # Acknowledge EVERY email that contained a photo — even ones we
+                # already had on disk — so a submitter always hears back.
+                if had_media:
+                    send_auto_reply(sender, config, final_date, reply_photos)
 
             mail.logout()
             break
