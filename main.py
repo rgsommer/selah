@@ -582,13 +582,18 @@ def _draw_night(screens, config):
     for idx, (stype, screen) in enumerate(photo_screens):
         did = disp_ids[idx] if idx < len(disp_ids) else None
         name = out_names[idx] if idx < len(out_names) else None
+        try:
+            ox, oy = screen.get_offset()      # exact xrandr layout position
+            pos = f"{ox}x{oy}"
+        except Exception:
+            pos = None
         if idx in off_idx:
             if output_power and (did is not None or name):
                 output_power(did, False, name)
             screen.fill((0, 0, 0))
         else:
             if output_power and (did is not None or name):
-                output_power(did, True, name)
+                output_power(did, True, name, pos)
             on_screens.append((stype, screen))
 
     if not on_screens:
@@ -1042,14 +1047,24 @@ def main():
                     last_drive_sync = current_ts
                 continue
 
-            # Daytime: make sure both HDMIs are on if night mode turned one off.
+            # Daytime: make sure both HDMIs are on if night mode turned one off,
+            # each restored at its own layout position (not mirrored at 0x0).
             if config.get("night_off_mode", "none") != "none":
                 try:
                     from modules.screen_power import output_power
-                    output_power(config.get("screen1_display_id", 2), True,
-                                 config.get("screen1_output", "HDMI-1"))
-                    output_power(config.get("screen2_display_id", 7), True,
-                                 config.get("screen2_output", "HDMI-2"))
+                    photo_screens = [(t, s) for t, s in screens.items()
+                                     if t.startswith("portrait") or t.startswith("landscape")]
+                    ids = [config.get("screen1_display_id", 2), config.get("screen2_display_id", 7)]
+                    names = [config.get("screen1_output", "HDMI-1"),
+                             config.get("screen2_output", "HDMI-2")]
+                    for idx, (stype, screen) in enumerate(photo_screens):
+                        try:
+                            ox, oy = screen.get_offset()
+                            pos = f"{ox}x{oy}"
+                        except Exception:
+                            pos = None
+                        output_power(ids[idx] if idx < len(ids) else None, True,
+                                     names[idx] if idx < len(names) else None, pos)
                 except Exception:
                     pass
 

@@ -27,7 +27,7 @@ def is_off():
 _out_state = {}
 
 
-def output_power(display_id, on, output_name=None):
+def output_power(display_id, on, output_name=None, pos=None):
     """Power a single HDMI output on/off, trying every mechanism that works
     across Raspberry Pi OS graphics stacks:
 
@@ -38,15 +38,24 @@ def output_power(display_id, on, output_name=None):
       - legacy firmware / fake-KMS: vcgencmd display_power 0/1 <id>
 
     display_id is the vcgencmd numeric id (Pi 4: HDMI-0 = 2, HDMI-1 = 7);
-    output_name is the xrandr connector (e.g. 'HDMI-1'). Idempotent per output."""
+    output_name is the xrandr connector (e.g. 'HDMI-1'); pos is the connector's
+    layout position (e.g. '1920x0') so it's restored in place rather than
+    mirrored at 0x0. Idempotent per output."""
     key = output_name if output_name else display_id
     if key is None:
         return
     if _out_state.get(key) == bool(on):
         return
     if output_name:
-        # X11 + KMS — the reliable per-connector lever on current Pi OS.
-        _run(f"xrandr --output {output_name} --{'auto' if on else 'off'}")
+        # X11 + KMS — the reliable per-connector lever on current Pi OS. On
+        # restore, pin the position so it doesn't snap to 0x0 and mirror.
+        if on:
+            cmd = f"xrandr --output {output_name} --auto"
+            if pos:
+                cmd += f" --pos {pos}"
+            _run(cmd)
+        else:
+            _run(f"xrandr --output {output_name} --off")
         # Wayland/wlroots uses HDMI-A-1 / HDMI-A-2 style names.
         wlr = "HDMI-A-" + str(output_name).split("-")[-1]
         _run(f"wlr-randr --output {wlr} --{'on' if on else 'off'}")
