@@ -9,8 +9,12 @@ so it's safe to re-run.
     python3 repull_emails.py                 # last 60 days, NO replies
     python3 repull_emails.py 365             # last 365 days
     python3 repull_emails.py all             # entire inbox
-    python3 repull_emails.py all --reply     # also send ONE 'received' reply
-                                             # per email that had a NEW photo
+    python3 repull_emails.py all --reply     # also send ONE 'received' reply per
+                                             # email that CONTAINS a photo
+
+--reply acknowledges every photo email in the window (even ones already saved),
+so use a TIGHT window (e.g. `2 --reply`) to reply only to recent submitters and
+avoid re-messaging people who were already acknowledged.
 """
 
 import os
@@ -61,7 +65,7 @@ def main():
     nums = data[0].split()
     print(f"{len(nums)} message(s) to examine.")
 
-    saved = skipped_existing = bounces = 0
+    saved = skipped_existing = bounces = replies = 0
     for num in nums:
         # BODY.PEEK[] fetches without setting the \Seen flag.
         _, md = m.fetch(num, "(BODY.PEEK[])")
@@ -85,26 +89,29 @@ def main():
                     break
         sdate = parse_subject_date(subject)
 
-        got_new = False
+        had_media = False
         for filename, data in iter_media_parts(msg):
+            had_media = True
             dest = save_media_bytes(data, filename, cfg, sender)
             if dest is None:                  # already had it (or error)
                 skipped_existing += 1
                 continue
             log_media(dest, sender, sdate or get_file_date(dest), caption or "")
             saved += 1
-            got_new = True
             print(f"  saved: {dest}")
-        if got_new and do_reply:              # acknowledge only newly-saved ones
+        # Reply to any email that contained a photo (not just newly-saved ones),
+        # so already-imported submissions can still be acknowledged.
+        if had_media and do_reply:
             try:
                 send_auto_reply(sender, cfg, sdate)
+                replies += 1
                 print(f"  replied to: {sender}")
             except Exception as e:
                 print(f"  reply failed to {sender}: {e}")
 
     m.logout()
     print(f"\nDone. saved {saved} new photo(s); {skipped_existing} already had; "
-          f"skipped {bounces} bounce/system message(s).")
+          f"skipped {bounces} bounce/system message(s); sent {replies} reply(ies).")
 
 
 if __name__ == "__main__":
