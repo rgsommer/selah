@@ -864,9 +864,9 @@ def _draw_number_badge(screen, rect, n):
         pass
 
 
-def _prompt_delete_number(screens, numbered):
+def _prompt_pick_photo(screens, numbered, verb="Delete"):
     """Overlay a yellow number on each displayed photo and let the user type the
-    one to delete. Keeps the photos visible while choosing. Returns the chosen
+    one to act on. Keeps the photos visible while choosing. Returns the chosen
     0-based index, or None if cancelled/invalid."""
     photo_screens = [(t, s) for t, s in screens.items()
                      if t.startswith(("portrait", "landscape"))]
@@ -881,7 +881,7 @@ def _prompt_delete_number(screens, numbered):
         if hint_screen:
             w, h = hint_screen.get_size()
             font = pygame.font.Font(None, max(28, w // 34))
-            msg = (f"Delete which photo?  {entered or '—'}    "
+            msg = (f"{verb} which photo?  {entered or '—'}    "
                    f"(1–{len(numbered)}, Enter, Esc)")
             txt = font.render(msg, True, (255, 255, 255))
             bar = pygame.Surface((txt.get_width() + 40, txt.get_height() + 24),
@@ -1214,7 +1214,7 @@ def main():
                             if not numbered:
                                 show_toast_if_needed(screens, config, "Nothing to delete")
                             elif target:
-                                choice = _prompt_delete_number(screens, numbered)
+                                choice = _prompt_pick_photo(screens, numbered, verb="Delete")
                                 if choice is None:
                                     state["nav_request"] = 1   # clear badges, move on
                                 else:
@@ -1296,6 +1296,32 @@ def main():
                         state["blackout_hours"] = min(6, state.get("blackout_hours", 0) + 1)
                         state["blackout_show_until"] = current_ts + 5   # preview window
                         state["blackout_until"] = 0                     # commit after preview
+                    elif event.key == pygame.K_F10:
+                        # Fix a photo's caption: pick it by number, edit inline, save.
+                        from modules.display_handler import get_photo_rects
+                        numbered = []
+                        for _st, _sc in screens.items():
+                            if _st.startswith(("portrait", "landscape")):
+                                for _p, _r in get_photo_rects(_sc):
+                                    numbered.append((_st, _sc, _r, _p))
+                        target = screens.get("landscape") or screens.get("portrait")
+                        if not numbered:
+                            show_toast_if_needed(screens, config, "No photo to edit")
+                        elif target:
+                            choice = _prompt_pick_photo(screens, numbered, verb="Edit caption for")
+                            state["nav_request"] = 1   # clear badges either way
+                            if choice is not None:
+                                cur_path = numbered[choice][3]
+                                from modules.caption_edit import get_caption, update_caption
+                                from modules.text_prompt import prompt_text
+                                old_cap = get_caption(cur_path)
+                                new_cap = prompt_text(target, "Edit caption", old_cap)
+                                if new_cap is not None and new_cap != old_cap:
+                                    n = update_caption(cur_path, new_cap)
+                                    media_log = _load_media_log()   # reflect it now
+                                    show_toast_if_needed(
+                                        screens, config,
+                                        "Caption updated" if n else "Couldn't save caption")
                     elif event.key in (pygame.K_h, pygame.K_QUESTION) or event.unicode == "?":
                         from modules.help_overlay import show_help
                         target = screens.get("landscape") or screens.get("portrait")
