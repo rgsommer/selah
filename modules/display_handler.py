@@ -439,19 +439,35 @@ def _load_surface(image_path):
     """
     try:
         from PIL import Image, ImageOps
+    except Exception:
+        return pygame.image.load(image_path)
+    try:
         with Image.open(image_path) as im:
             # Decode JPEGs at reduced resolution up front so a giant scan never
-            # allocates the full bitmap (~585MB for 195MP) on the Pi.
+            # allocates the full bitmap (~585MB for 195MP) on the Pi. Perf only —
+            # its failure must NOT skip the rotation step below.
             try:
                 im.draft("RGB", (4000, 4000))
             except Exception:
                 pass
-            im = ImageOps.exif_transpose(im).convert("RGB")
+            # Rotation is critical: isolate it so a later convert/thumbnail hiccup
+            # can't send us to the unrotated pygame fallback.
+            try:
+                im = ImageOps.exif_transpose(im)
+            except Exception as e:
+                log_error(f"exif_transpose failed for {os.path.basename(image_path)}: {e}")
+            im = im.convert("RGB")
             if max(im.size) > 4000:
                 im.thumbnail((4000, 4000), Image.LANCZOS)
             return pygame.image.fromstring(im.tobytes(), im.size, "RGB")
-    except Exception:
-        return pygame.image.load(image_path)
+    except Exception as e:
+        # Last resort: pygame.image.load ignores EXIF, so this photo may show
+        # sideways. Log it so mis-rotated files can be identified.
+        log_error(f"PIL load failed (may show unrotated): {os.path.basename(image_path)}: {e}")
+        try:
+            return pygame.image.load(image_path)
+        except Exception:
+            return None
 
 
 def _scaled_image(image_path, max_w, max_h):
