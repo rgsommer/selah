@@ -381,15 +381,43 @@ def iter_media_parts(msg, min_image_bytes=15000):
         yield fn, data
 
 
+def _same_bytes(path, data):
+    """True if `path` already holds exactly these bytes (a real duplicate)."""
+    try:
+        if path.stat().st_size != len(data):
+            return False
+        return path.read_bytes() == data
+    except Exception:
+        return False
+
+
 def save_media_bytes(data, filename, config, sender=None):
-    """Write photo/video bytes under media/email/<sender>/, avoiding overwrite.
-    Returns the saved path, or None if a same-named file already exists."""
+    """Write photo/video bytes under media/email/<sender>/.
+
+    Dedups by CONTENT, not filename: generic names like 'photo_1.jpg' collide
+    across different submissions, so a name clash alone must NOT drop a new
+    photo. Returns the saved path, or None only if these exact bytes are already
+    on disk (a true duplicate). A same-named but different photo is saved under
+    a unique '<name>_N' so it isn't lost."""
     try:
         folder = Path(config.get("email_dir", "media/email")) / _sender_folder(sender)
         folder.mkdir(parents=True, exist_ok=True)
         dest = folder / filename
         if dest.exists():
-            return None                       # already have it — don't duplicate
+            if _same_bytes(dest, data):
+                return None                   # identical content — real duplicate
+            # Same name, different photo — find a free unique name (and still
+            # bail if the identical content already sits under a suffix).
+            base, ext = os.path.splitext(filename)
+            i = 1
+            while True:
+                cand = folder / f"{base}_{i}{ext}"
+                if not cand.exists():
+                    dest = cand
+                    break
+                if _same_bytes(cand, data):
+                    return None
+                i += 1
         with open(dest, "wb") as f:
             f.write(data)
         return str(dest)
