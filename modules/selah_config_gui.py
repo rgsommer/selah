@@ -419,6 +419,7 @@ def show_config_gui(screen, config, screens=None):
             ("balanced_rotation", "Balanced Folder Rotation", "bool"),
             ("screen_rotation_sync", "Screens Change Together", "bool"),
             ("recent_memory_enabled", "Avoid Repeats (recent memory)", "bool"),
+            ("feature_new_days", "Feature New Pics (days)", "int"),
             ("on_this_day_enabled", "On-This-Day Flashbacks", "bool"),
             ("on_this_day_sprinkle", "  Sprinkle Through Day (off = first thing)", "bool"),
             ("on_this_day_interval_minutes", "  Sprinkle Every (min)", "int"),

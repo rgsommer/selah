@@ -239,6 +239,52 @@ def _maybe_hourly_greetings(state, config):
         fq.append((it["path"], it.get("caption") or "A special greeting"))
 
 
+def _maybe_feature_recent(state, config):
+    """Feature newly-submitted (non-special) photos for feature_new_days days:
+    re-queue the last N days of submissions each hour so they show regularly
+    before folding into the normal rotation. Excludes dated greetings."""
+    if not config.get("feature_new_enabled", True):
+        return
+    days = int(config.get("feature_new_days", 3) or 0)
+    if days <= 0:
+        return
+    hour_key = datetime.datetime.now().strftime("%Y-%m-%d %H")
+    if state.get("last_feature_hour") == hour_key:
+        return
+    state["last_feature_hour"] = hour_key
+    try:
+        with open("media_log.json") as f:
+            log = json.load(f)
+    except Exception:
+        return
+    try:
+        from modules.scheduled_media import scheduled_paths
+        sched = scheduled_paths()
+    except Exception:
+        sched = set()
+    cutoff = datetime.datetime.now() - datetime.timedelta(days=days)
+    from collections import deque
+    fq = state.get("flashback_queue")
+    if not isinstance(fq, deque):
+        fq = deque()
+        state["flashback_queue"] = fq
+    added = 0
+    for e in reversed(log):                     # newest first, capped
+        if added >= 20:
+            break
+        p = e.get("file_path")
+        ts = e.get("timestamp")
+        if not p or not ts or p in sched or not os.path.exists(p):
+            continue
+        try:
+            if datetime.datetime.fromisoformat(ts) < cutoff:
+                continue
+        except Exception:
+            continue
+        fq.append((p, e.get("caption") or ""))
+        added += 1
+
+
 def _maybe_sprinkle(state, config, current_ts):
     """Release one on-this-day flashback into the queue every
     on_this_day_interval_minutes, when sprinkle mode is on."""
@@ -1005,6 +1051,8 @@ def main():
 
             # Re-queue today's greetings each hour so they recur through the day.
             _maybe_hourly_greetings(state, config)
+            # Feature recently-submitted photos for their first few days.
+            _maybe_feature_recent(state, config)
 
             # ---- MOTION DETECTION ----
             if config.get("motion_triggered_slideshow", False):

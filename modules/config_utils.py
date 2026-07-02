@@ -36,6 +36,8 @@ DEFAULT_CONFIG = {
     "balanced_rotation": True,
     "screen_rotation_sync": True,
     "greetings_hourly": True,
+    "feature_new_enabled": True,
+    "feature_new_days": 3,
     "on_this_day_enabled": True,
     "on_this_day_sprinkle": False,
     "on_this_day_interval_minutes": 30,
