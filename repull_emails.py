@@ -6,9 +6,11 @@ media/email/<Sender>/ — skipping bounce/mailer-daemon notices and files alread
 saved. It does NOT mark messages read (uses BODY.PEEK) and sends NO auto-replies,
 so it's safe to re-run.
 
-    python3 repull_emails.py                 # last 60 days
+    python3 repull_emails.py                 # last 60 days, NO replies
     python3 repull_emails.py 365             # last 365 days
     python3 repull_emails.py all             # entire inbox
+    python3 repull_emails.py all --reply     # also send ONE 'received' reply
+                                             # per email that had a NEW photo
 """
 
 import os
@@ -22,7 +24,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 from modules.config_utils import load_config
 from modules.email_handler import (
     _is_bounce, _subject_caption, parse_subject_date, extract_caption,
-    get_file_date, log_media, iter_media_parts, save_media_bytes,
+    get_file_date, log_media, iter_media_parts, save_media_bytes, send_auto_reply,
 )
 
 
@@ -33,8 +35,12 @@ def main():
         print("No email credentials configured.")
         return
 
+    args = [a.lower() for a in sys.argv[1:]]
+    do_reply = "--reply" in args
+    args = [a for a in args if a != "--reply"]
+
     # Date window
-    arg = (sys.argv[1] if len(sys.argv) > 1 else "60").lower()
+    arg = (args[0] if args else "60")
     criteria = "ALL"
     if arg != "all":
         try:
@@ -79,6 +85,7 @@ def main():
                     break
         sdate = parse_subject_date(subject)
 
+        got_new = False
         for filename, data in iter_media_parts(msg):
             dest = save_media_bytes(data, filename, cfg, sender)
             if dest is None:                  # already had it (or error)
@@ -86,7 +93,14 @@ def main():
                 continue
             log_media(dest, sender, sdate or get_file_date(dest), caption or "")
             saved += 1
+            got_new = True
             print(f"  saved: {dest}")
+        if got_new and do_reply:              # acknowledge only newly-saved ones
+            try:
+                send_auto_reply(sender, cfg, sdate)
+                print(f"  replied to: {sender}")
+            except Exception as e:
+                print(f"  reply failed to {sender}: {e}")
 
     m.logout()
     print(f"\nDone. saved {saved} new photo(s); {skipped_existing} already had; "
