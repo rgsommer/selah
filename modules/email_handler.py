@@ -554,6 +554,31 @@ def _thumbnail_bytes(path, size=170):
         return None
 
 
+def _submit_guidance(config):
+    """(plain, html) guidance: keep emails small, use the shared Drive folder for
+    big batches/videos. The folder link only appears when submit_drive_url is set."""
+    url = (config.get("submit_drive_url") or "").strip()
+    plain = ("\nA few photos per email is perfect — very large emails (lots of "
+             "photos at once, or roughly 25 MB+) can bounce, so please keep each "
+             "one to a handful.")
+    link_html = ""
+    if url:
+        plain += ("\nHave a big batch, high-res originals, or a video? Drop them "
+                  f"straight into our shared folder:\n  {url}")
+        link_html = (
+            f'<div style="margin-top:10px"><a href="{url}" '
+            'style="color:#b5651d;font-weight:600;text-decoration:none">'
+            '📁 Open the shared photo folder →</a>'
+            '<div style="font-size:12px;color:#999;margin-top:2px">'
+            'best for big batches, videos, or high-res originals</div></div>')
+    html = ('<div style="margin-top:18px;padding:14px 16px;background:#fbf3e9;'
+            'border:1px solid #eddcc7;border-radius:12px;font-size:13.5px;'
+            'color:#5a5045;line-height:1.5"><b>A few at a time is perfect</b> — '
+            'very large emails can bounce, so please keep each one to a handful '
+            'of photos.' + link_html + '</div>')
+    return plain, html
+
+
 def send_auto_reply(sender, config, date, photos=None):
     """Send a formatted confirmation, plural-aware, with thumbnails of the
     submitted photos inline."""
@@ -564,6 +589,7 @@ def send_auto_reply(sender, config, date, photos=None):
     owner = config["email_address"]
     try:
         body = get_custom_response(sender, date, config, count)
+        guide_plain, guide_html = _submit_guidance(config)
 
         # Build inline thumbnails (skip videos / unreadable).
         thumbs = []
@@ -578,7 +604,7 @@ def send_auto_reply(sender, config, date, photos=None):
         root["To"] = sender
 
         alt = MIMEMultipart("alternative")
-        alt.attach(MIMEText(body + "\n" + DID_YOU_KNOW, "plain"))
+        alt.attach(MIMEText(body + "\n" + guide_plain + "\n" + DID_YOU_KNOW, "plain"))
 
         thumb_html = ""
         if thumbs:
@@ -601,6 +627,7 @@ def send_auto_reply(sender, config, date, photos=None):
               border-radius:0 0 14px 14px">
     <p style="font-size:15px;line-height:1.6;margin:0">{body}</p>
     {thumb_html}
+    {guide_html}
     {_DYK_HTML}
   </div>
 </div>"""
@@ -651,11 +678,12 @@ Here's how it works:
   - Want to add a caption? The first sentence of your email becomes the \
 caption shown under the photo.
 
-PREFER NOT TO EMAIL?
-You can also upload photos straight to our shared family Google Drive folder —
-just drop them into the subfolder with your name on it. (Reply to this email
-and we'll send you the folder link.) Dated filenames work there too, e.g. name
-a photo "Happy Birthday, Mom Sept 4.jpg".
+A NOTE ON BIG BATCHES:
+A few photos per email is best — very large emails (lots of photos at once, or
+roughly 25 MB+) can bounce. For bigger batches, high-res originals, or videos,
+upload straight to our shared family Google Drive folder:
+{drive}
+Dated filenames work there too, e.g. name a photo "Happy Birthday, Mom Sept 4.jpg".
 
 SENDING A BIRTHDAY (OR ANNIVERSARY) GREETING — plan ahead!
 You don't have to remember on the day. Email your photo a few days early
@@ -670,10 +698,18 @@ that feature the birthday person. Other date formats work too:
       Subject: Merry Christmas 2026-12-25
       Subject: Happy Anniversary, Mom & Dad June 15
 
-We'd love to see your photos up on the screen. Send as many as you like!
+We'd love to see your photos up on the screen — a few at a time by email, or a
+whole batch in the shared folder!
 
 - The Selah Family Display
 """
+
+
+def _invite_drive_text(config):
+    """The shared-folder line for the invite: the real link if set, else a
+    reply-for-link fallback."""
+    url = (config.get("submit_drive_url") or "").strip()
+    return f"    {url}" if url else "    (Reply to this email and we'll send you the folder link.)"
 
 
 def _handle_unapproved_sender(sender, msg, config, screens):
@@ -975,7 +1011,8 @@ def send_annual_invites(config):
         name = sender_email.split("@")[0].replace(".", " ").replace("_", " ").title()
 
         try:
-            body = ANNUAL_INVITE_BODY.replace("{name}", name).replace("{email}", owner)
+            body = (ANNUAL_INVITE_BODY.replace("{name}", name).replace("{email}", owner)
+                        .replace("{drive}", _invite_drive_text(config)))
             msg = MIMEText(body)
             msg["Subject"] = ANNUAL_INVITE_SUBJECT
             msg["From"] = owner
@@ -1336,7 +1373,8 @@ def send_invitations(config, recipients=None):
             continue
         try:
             name = sender_email.split("@")[0].replace(".", " ").replace("_", " ").title()
-            body = ANNUAL_INVITE_BODY.replace("{name}", name).replace("{email}", owner)
+            body = (ANNUAL_INVITE_BODY.replace("{name}", name).replace("{email}", owner)
+                        .replace("{drive}", _invite_drive_text(config)))
             msg = MIMEText(body)
             msg["Subject"] = ANNUAL_INVITE_SUBJECT
             msg["From"] = owner

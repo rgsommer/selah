@@ -149,6 +149,7 @@ DEFAULT_CONFIG = {
     "notification_duration": 15,
     "immediate_display": True,
     "custom_email_responses": True,
+    "submit_drive_url": "",          # shareable Drive folder link for big batches (shown in emails)
     "show_file_name": True,
     "show_file_date": True,
     "show_caption": True,
