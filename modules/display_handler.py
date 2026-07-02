@@ -483,9 +483,25 @@ def _apply_effect(surf, effect):
     return surf
 
 
-def _maybe_effect(surf, config):
-    """Randomly apply sepia/B&W to a photo, per the configured chance."""
+def _is_recent_submission(path, config):
+    """True if a photo was added within the feature window — keep it true colour."""
+    if not path or not config.get("feature_new_enabled", True):
+        return False
+    days = int(config.get("feature_new_days", 3) or 0)
+    if days <= 0:
+        return False
+    try:
+        return (time.time() - os.path.getmtime(path)) / 86400.0 <= days
+    except Exception:
+        return False
+
+
+def _maybe_effect(surf, config, path=None):
+    """Randomly apply sepia/B&W to a photo, per the configured chance — but never
+    to a newly-submitted photo while it's being featured (keep it true colour)."""
     if surf is None or not config.get("photo_effects_enabled", False):
+        return surf
+    if _is_recent_submission(path, config):
         return surf
     try:
         if random.randint(1, 100) <= int(config.get("photo_effect_chance", 15)):
@@ -508,7 +524,7 @@ def _build_single_frame(screen, image_path, config, file_date, caption):
     frame.fill((0, 0, 0))
     img = _scaled_image(image_path, w, h)
     if img:
-        img = _maybe_effect(img, config)
+        img = _maybe_effect(img, config, image_path)
         iw, ih = img.get_size()
         frame.blit(img, ((w - iw) // 2, (h - ih) // 2))
     try:
@@ -551,7 +567,7 @@ def _build_grid_frame(screen, paths, cols, rows, config):
             try:
                 img = _scaled_image(paths[n], cell_w, cell_h)
                 if img:
-                    img = _maybe_effect(img, config)
+                    img = _maybe_effect(img, config, paths[n])
                     iw, ih = img.get_size()
                     frame.blit(img, (cx + (cell_w - iw) // 2, cy + (cell_h - ih) // 2))
             except Exception as e:
@@ -580,7 +596,7 @@ def _build_split_frame(screen, paths, config):
         try:
             img = _scaled_image(paths[idx], cw, ch)
             if img:
-                img = _maybe_effect(img, config)
+                img = _maybe_effect(img, config, paths[idx])
                 iw, ih = img.get_size()
                 frame.blit(img, (cx + (cw - iw) // 2, cy + (ch - ih) // 2))
         except Exception as e:
@@ -611,7 +627,7 @@ def _build_cascade_frame(screen, paths, config):
         try:
             im = _scaled_image(p, cell_w, cell_h)
             if im:
-                imgs.append(_maybe_effect(im, config))
+                imgs.append(_maybe_effect(im, config, p))
         except Exception as e:
             log_error(f"Cascade render failed for {p}: {e}")
     if not imgs:
