@@ -18,6 +18,7 @@ DEFAULT_CONFIG = {
     "manual_navigation_pause": 60,
     "layout_variety_enabled": True,
     "multi_opposite_orientation": True,
+    "feature_opposite_orientation": False,  # F8: True = portraits on the landscape screen
     "layout_fade_enabled": True,
     "transition_style": "random",
     "layout_weights": {"single": 50, "split": 20, "cascade": 20, "tile3": 30, "tile6": 20},

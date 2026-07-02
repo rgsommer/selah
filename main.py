@@ -311,17 +311,22 @@ def _recent_media_items(config, days):
     return items
 
 
-def _queue_feature_by_orientation(items, screens, portrait_files, landscape_files, state):
+def _queue_feature_by_orientation(items, screens, portrait_files, landscape_files,
+                                  state, opposite=False):
     """Route F8's recent photos into per-screen queues, matched by orientation so
     portraits show on the portrait screen and landscapes on the landscape screen,
-    each photo on exactly one screen (no cross-screen duplicates). Returns the
-    number of photos queued."""
+    each photo on exactly one screen (no cross-screen duplicates). With
+    opposite=True the pairing is flipped (portraits -> landscape screen). Returns
+    the number of photos queued."""
     from collections import deque
     photo_types = [t for t in screens if t.startswith(("portrait", "landscape"))]
     if not photo_types:
         return 0
     p_types = [t for t in photo_types if t.startswith("portrait")]
     l_types = [t for t in photo_types if t.startswith("landscape")]
+    # Which screen a portrait vs a landscape photo should target.
+    port_target = l_types if opposite else p_types
+    land_target = p_types if opposite else l_types
     pset, lset = set(portrait_files), set(landscape_files)
 
     def _is_port(path):
@@ -337,10 +342,10 @@ def _queue_feature_by_orientation(items, screens, portrait_files, landscape_file
 
     buckets = {t: [] for t in photo_types}
     for path, caption in items:                       # newest first
-        if _is_port(path) and p_types:
-            targets = p_types
-        elif (not _is_port(path)) and l_types:
-            targets = l_types
+        if _is_port(path) and port_target:
+            targets = port_target
+        elif (not _is_port(path)) and land_target:
+            targets = land_target
         else:                                         # no screen of that orientation
             targets = photo_types
         t = min(targets, key=lambda x: len(buckets[x]))   # balance same-orient screens
@@ -1107,7 +1112,8 @@ def main():
                             if items:
                                 total = _queue_feature_by_orientation(
                                     items, screens, portrait_files,
-                                    landscape_files, state)
+                                    landscape_files, state,
+                                    opposite=config.get("feature_opposite_orientation", False))
                                 # Clear any manual pause so the queue plays now.
                                 for _st in screens:
                                     if _st.startswith(("portrait", "landscape")):
