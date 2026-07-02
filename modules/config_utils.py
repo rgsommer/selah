@@ -82,6 +82,8 @@ DEFAULT_CONFIG = {
     "night_off_mode": "none",       # none | 1 | 2 | both  (which HDMI off at night)
     "screen1_display_id": 2,         # vcgencmd id for screen 1 (Pi4 HDMI-0 = 2)
     "screen2_display_id": 7,         # vcgencmd id for screen 2 (Pi4 HDMI-1 = 7)
+    "screen1_output": "HDMI-1",      # xrandr connector for screen 1 (KMS per-output off)
+    "screen2_output": "HDMI-2",      # xrandr connector for screen 2
     "night_portrait_off": True,
     "night_info_screen": "landscape",
     "night_sunrise_enabled": True,
