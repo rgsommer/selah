@@ -1106,6 +1106,49 @@ take you off the list.)
 """
 
 
+def _nudge_html(name, owner_name, has_thumb, caption):
+    """Branded HTML nudge, optionally featuring the recipient's own last photo."""
+    thumb_block = ""
+    if has_thumb:
+        cap = ""
+        if caption:
+            cap = (f'<div style="font-size:13px;color:#888;margin-top:8px;'
+                   f'font-style:italic">"{caption}"</div>')
+        thumb_block = f"""
+    <div style="margin:20px 0;text-align:center">
+      <div style="font-size:13px;color:#999;margin-bottom:8px">
+        Remember this one you sent?</div>
+      <img src="cid:lastphoto" width="230"
+           style="border-radius:12px;border:5px solid #fff;
+                  box-shadow:0 3px 10px rgba(0,0,0,.25)">
+      {cap}
+    </div>"""
+    return f"""\
+<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+            max-width:560px;margin:0 auto;color:#333">
+  <div style="background:linear-gradient(135deg,#b5651d,#d98b3f);color:#fff;
+              padding:20px 22px;border-radius:14px 14px 0 0">
+    <div style="font-size:22px;font-weight:700">📷 We miss your photos, {name}!</div>
+    <div style="opacity:.9;font-size:14px;margin-top:2px">{owner_name}</div>
+  </div>
+  <div style="padding:20px 22px;background:#fff;border:1px solid #eee;border-top:0;
+              border-radius:0 0 14px 14px">
+    <p style="font-size:15px;line-height:1.6;margin:0">
+      It's been a while since one of your photos lit up the display. Share a
+      favourite memory and it'll be up within a minute.</p>
+    {thumb_block}
+    <div style="text-align:center;margin:22px 0 6px">
+      <div style="display:inline-block;background:#b5651d;color:#fff;font-weight:600;
+                  padding:12px 22px;border-radius:999px;font-size:15px">
+        Just reply to this email with a photo attached 📎</div>
+    </div>
+    {_DYK_HTML}
+    <p style="font-size:12px;color:#aaa;margin:18px 0 0;text-align:center">
+      Prefer not to get these? Reply "stop" and we'll take you off the list.</p>
+  </div>
+</div>"""
+
+
 def _last_submission_by_email():
     """Map sender email -> most recent submission datetime, from media_log."""
     out = {}
@@ -1126,6 +1169,28 @@ def _last_submission_by_email():
         if addr not in out or dt > out[addr]:
             out[addr] = dt
     return out
+
+
+def _last_photo_by_email():
+    """Map sender email -> (path, caption) of their most recent logged photo."""
+    latest = {}   # addr -> (dt, path, caption)
+    try:
+        with open("media_log.json") as f:
+            log = json.load(f)
+    except Exception:
+        return {}
+    for e in log:
+        addr = _extract_email(e.get("sender", "") or "")
+        ts, path = e.get("timestamp"), e.get("file_path")
+        if not addr or not ts or not path:
+            continue
+        try:
+            dt = datetime.datetime.fromisoformat(ts)
+        except Exception:
+            continue
+        if addr not in latest or dt > latest[addr][0]:
+            latest[addr] = (dt, path, e.get("caption") or "")
+    return {a: (p, c) for a, (d, p, c) in latest.items()}
 
 
 def send_inactivity_nudges(config):
@@ -1158,6 +1223,7 @@ def send_inactivity_nudges(config):
 
     owner_name = config.get("display_owner_name", "the family display")
     last_sub = _last_submission_by_email()
+    last_photo = _last_photo_by_email()
     optout = load_nudge_optout()
     sent = 0
     for sender_email in senders:
@@ -1175,11 +1241,27 @@ def send_inactivity_nudges(config):
                 pass
         name = sender_email.split("@")[0].replace(".", " ").replace("_", " ").title()
         try:
+            # A thumbnail of the recipient's own most recent photo, if we have one.
+            path, caption = last_photo.get(sender_email, (None, ""))
+            thumb = _thumbnail_bytes(path, size=230) if path else None
+
             body = NUDGE_BODY.replace("{name}", name).replace("{owner}", owner_name)
-            msg = MIMEText(body)
+            html = _nudge_html(name, owner_name, bool(thumb), caption)
+
+            msg = MIMEMultipart("related")
             msg["Subject"] = NUDGE_SUBJECT.replace("{name}", name).replace("{owner}", owner_name)
             msg["From"] = owner
             msg["To"] = sender_email
+            alt = MIMEMultipart("alternative")
+            alt.attach(MIMEText(body, "plain"))
+            alt.attach(MIMEText(html, "html"))
+            msg.attach(alt)
+            if thumb:
+                img = MIMEImage(thumb, "jpeg")
+                img.add_header("Content-ID", "<lastphoto>")
+                img.add_header("Content-Disposition", "inline", filename="lastphoto.jpg")
+                msg.attach(img)
+
             with smtplib.SMTP(config["smtp_server"], config["smtp_port"]) as server:
                 server.starttls()
                 server.login(owner, config["email_password"])
