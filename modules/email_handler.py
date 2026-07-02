@@ -141,6 +141,11 @@ def check_for_new_emails(config, screens):
                     except Exception:
                         pass
                     try:
+                        from modules.pending_photos import add as _queue_new
+                        _queue_new(file_path)   # surface at the next rotation
+                    except Exception:
+                        pass
+                    try:
                         from modules.new_photo_hint import note_new_photo
                         note_new_photo(kind="email")
                     except Exception:

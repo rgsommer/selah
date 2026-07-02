@@ -312,7 +312,7 @@ def _recent_media_items(config, days):
 
 
 def _queue_feature_by_orientation(items, screens, portrait_files, landscape_files,
-                                  state, opposite=False):
+                                  state, opposite=False, front=False):
     """Route F8's recent photos into per-screen queues, matched by orientation so
     portraits show on the portrait screen and landscapes on the landscape screen,
     each photo on exactly one screen (no cross-screen duplicates). With
@@ -332,8 +332,6 @@ def _queue_feature_by_orientation(items, screens, portrait_files, landscape_file
         except Exception:
             w, h = 1, 1
         (p_types if h > w else l_types).append(t)
-        log_error(f"[F8] screen '{t}' size {w}x{h} -> "
-                  f"{'PORTRAIT' if h > w else 'LANDSCAPE'} screen")
     # Which screen a portrait vs a landscape photo should target.
     port_target = l_types if opposite else p_types
     land_target = p_types if opposite else l_types
@@ -365,12 +363,21 @@ def _queue_feature_by_orientation(items, screens, portrait_files, landscape_file
     fbs = state.setdefault("feature_by_screen", {})
     total = 0
     for t, lst in buckets.items():
-        if lst:
-            fbs[t] = deque(lst)
-            total += len(lst)
-    log_error(f"[F8] opposite={opposite}; portrait photos->{port_target}, "
-              f"landscape photos->{land_target}; classified {nport} portrait / "
-              f"{nland} landscape; queued " + ", ".join(f"{t}:{len(b)}" for t, b in buckets.items()))
+        if not lst:
+            continue
+        dq = fbs.get(t)
+        if not isinstance(dq, deque):
+            dq = deque()
+            fbs[t] = dq
+        if front:                       # new arrivals jump to the next rotation
+            for it in reversed(lst):
+                dq.appendleft(it)
+        else:                           # F8 batch appends after any current queue
+            dq.extend(lst)
+        total += len(lst)
+    log_error(f"[feature] {'arrival' if front else 'F8'} opposite={opposite}; "
+              f"portrait->{port_target}, landscape->{land_target}; "
+              f"{nport}p/{nland}l; queued " + ", ".join(f"{t}:{len(b)}" for t, b in buckets.items()))
     return total
 
 
@@ -1538,16 +1545,26 @@ def main():
                     media_log = _load_media_log()
                 last_media_refresh = current_ts
 
-            # ---- IMMEDIATE DISPLAY of new media ----
-            if state.get("new_media") and config.get("immediate_display", False):
-                for screen_type, screen in screens.items():
-                    if screen_type in (state.get("new_media") or {}):
-                        file_path = state["new_media"][screen_type]
-                        file_date, caption = _get_media_metadata(file_path, media_log)
-                        _display_file(screen, file_path, config, file_date, caption)
-                        state[screen_type]["paused_until"] = current_ts + config.get("manual_navigation_pause", 60)
-                state["new_media"] = None
-                continue
+            # ---- IMMEDIATE DISPLAY of new arrivals ----
+            # A just-emailed photo is surfaced at the very NEXT rotation, on the
+            # correctly-oriented screen (via the same per-screen feature queue as
+            # F8), then normal programming continues.
+            try:
+                from modules.pending_photos import take_all as _take_new
+                _new = _take_new()
+            except Exception:
+                _new = []
+            if _new and config.get("immediate_display", True):
+                _queue_feature_by_orientation(
+                    [(p, None) for p in _new], screens, portrait_files,
+                    landscape_files, state,
+                    opposite=config.get("feature_opposite_orientation", False),
+                    front=True)
+                for _st in screens:               # clear any manual pause
+                    if _st.startswith(("portrait", "landscape")):
+                        state.setdefault(_st, {})["paused_until"] = 0
+                state["paused"] = False
+                last_media_refresh = 0            # also fold into normal rotation promptly
 
             # ---- VOICE CONTROL ----
             if config.get("voice_control_enabled", False):
