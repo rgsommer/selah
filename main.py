@@ -285,6 +285,53 @@ def _maybe_feature_recent(state, config):
         added += 1
 
 
+def _recent_media_items(config, days):
+    """All photos submitted in the last `days` days, newest first, as
+    (path, caption) — used by F8 to feature the latest arrivals on demand."""
+    try:
+        with open("media_log.json") as f:
+            log = json.load(f)
+    except Exception:
+        return []
+    cutoff = datetime.datetime.now() - datetime.timedelta(days=max(1, days))
+    seen, items = set(), []
+    for e in reversed(log):                         # newest first
+        p, ts = e.get("file_path"), e.get("timestamp")
+        if not p or not ts or p in seen or not os.path.exists(p):
+            continue
+        if p.lower().endswith(VIDEO_EXTS):
+            continue
+        try:
+            if datetime.datetime.fromisoformat(ts) < cutoff:
+                continue
+        except Exception:
+            continue
+        seen.add(p)
+        items.append((p, e.get("caption") or ""))
+    return items
+
+
+def _set_all_hdmi(config, screens, on):
+    """Power every photo screen's HDMI on/off together (F9 blackout / restore),
+    each restored at its own layout position. Idempotent via output_power."""
+    try:
+        from modules.screen_power import output_power
+    except Exception:
+        return
+    photo_screens = [(t, s) for t, s in screens.items()
+                     if t.startswith("portrait") or t.startswith("landscape")]
+    ids = [config.get("screen1_display_id", 2), config.get("screen2_display_id", 7)]
+    names = [config.get("screen1_output", "HDMI-1"), config.get("screen2_output", "HDMI-2")]
+    for idx, (stype, screen) in enumerate(photo_screens):
+        try:
+            ox, oy = screen.get_offset()
+            pos = f"{ox}x{oy}"
+        except Exception:
+            pos = None
+        output_power(ids[idx] if idx < len(ids) else None, on,
+                     names[idx] if idx < len(names) else None, pos)
+
+
 def _maybe_sprinkle(state, config, current_ts):
     """Release one on-this-day flashback into the queue every
     on_this_day_interval_minutes, when sprinkle mode is on."""
@@ -904,6 +951,12 @@ def main():
             # F-key actions (live in main.py because they call its UIs).
             for event in events:
                 if event.type == pygame.KEYDOWN:
+                    # An F9 blackout is woken early by any nav/space press.
+                    if state.get("blackout_until", 0) > current_ts and event.key in (
+                            pygame.K_SPACE, pygame.K_LEFT, pygame.K_RIGHT,
+                            pygame.K_UP, pygame.K_DOWN):
+                        state["blackout_until"] = 0
+                        continue
                     if event.key == pygame.K_ESCAPE:
                         print("[Selah] ESC pressed - shutting down.")
                         pygame.quit()
@@ -982,6 +1035,46 @@ def main():
                                 if fb else "No memories for today")
                         except Exception as e:
                             log_error(f"F7 on-this-day failed: {e}")
+                    elif event.key == pygame.K_F8:
+                        # Feature every new photo from the last few days now, then
+                        # normal programming resumes once the queue drains.
+                        try:
+                            from collections import deque
+                            days = int(config.get("feature_new_days", 3) or 3)
+                            items = _recent_media_items(config, days)
+                            if items:
+                                fq = state.get("flashback_queue")
+                                if not isinstance(fq, deque):
+                                    fq = deque()
+                                    state["flashback_queue"] = fq
+                                for it in reversed(items):   # newest shows first
+                                    fq.appendleft(it)
+                                # Clear any manual pause so the queue plays now.
+                                for _st in screens:
+                                    if _st.startswith(("portrait", "landscape")):
+                                        state.setdefault(_st, {})["paused_until"] = 0
+                                state["paused"] = False
+                                show_toast_if_needed(
+                                    screens, config,
+                                    f"Featuring {len(items)} new photo(s) "
+                                    f"from the last {days} days")
+                            else:
+                                show_toast_if_needed(
+                                    screens, config,
+                                    f"No new photos in the last {days} days")
+                        except Exception as e:
+                            log_error(f"F8 feature-recent failed: {e}")
+                    elif event.key == pygame.K_F9:
+                        # Pause + turn the displays off for a while: +1 hour per
+                        # press, capped at 6 hours total from now.
+                        cap = current_ts + 6 * 3600
+                        base = max(current_ts, state.get("blackout_until", 0))
+                        state["blackout_until"] = min(base + 3600, cap)
+                        hrs = max(1, round((state["blackout_until"] - current_ts) / 3600))
+                        show_toast_if_needed(
+                            screens, config,
+                            f"Displays off for {hrs} hour{'s' if hrs != 1 else ''} "
+                            "(F9 to add, Space/arrow to wake)")
                     elif event.key in (pygame.K_h, pygame.K_QUESTION) or event.unicode == "?":
                         from modules.help_overlay import show_help
                         target = screens.get("landscape") or screens.get("portrait")
@@ -1006,6 +1099,33 @@ def main():
                         _files = portrait_files if _stype.startswith("portrait") else landscape_files
                         _nav_history(_screen, _stype, _files, state, config, media_log, _dir)
                         state.setdefault(_stype, {})["paused_until"] = current_ts + pause_for
+
+            # ---- MANUAL BLACKOUT (F9): displays fully off for a set time ----
+            if current_ts < state.get("blackout_until", 0):
+                state["blackout_active"] = True
+                _set_all_hdmi(config, screens, on=False)
+                for screen in screens.values():
+                    try:
+                        screen.fill((0, 0, 0))
+                    except Exception:
+                        pass
+                try:
+                    pygame.display.flip()
+                except Exception:
+                    pass
+                # Keep intake alive while dark so submissions still land.
+                if current_ts - last_email_check > email_check_interval:
+                    try:
+                        check_for_new_emails(config, screens)
+                    except Exception:
+                        pass
+                    last_email_check = current_ts
+                _responsive_sleep(5)   # stays responsive to F9-again / wake keys
+                continue
+            elif state.get("blackout_active"):
+                state["blackout_active"] = False
+                _set_all_hdmi(config, screens, on=True)   # power back on, in place
+                show_toast_if_needed(screens, config, "Welcome back")
 
             # ---- NIGHT MODE ----
             if is_display_off(current_time, config):
