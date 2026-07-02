@@ -21,8 +21,8 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 from modules.config_utils import load_config
 from modules.email_handler import (
-    _is_bounce, _sender_folder, _subject_caption, parse_subject_date,
-    extract_caption, get_file_date, log_media,
+    _is_bounce, _subject_caption, parse_subject_date, extract_caption,
+    get_file_date, log_media, iter_media_parts, save_media_bytes,
 )
 
 
@@ -48,7 +48,6 @@ def main():
     else:
         print("Scanning the ENTIRE inbox...")
 
-    exts = tuple(cfg.get("valid_extensions", [".jpg", ".jpeg", ".png", ".mp4", ".mov"]))
     m = imaplib.IMAP4_SSL(cfg.get("imap_server", "imap.gmail.com"))
     m.login(addr, pw)
     m.select("inbox")
@@ -70,33 +69,24 @@ def main():
             continue
 
         caption = _subject_caption(subject)
-        sdate = parse_subject_date(subject)
-        folder = os.path.join(cfg.get("email_dir", "media/email"), _sender_folder(sender))
-
-        for part in msg.walk():
-            if part.get_content_disposition() != "attachment":
-                if part.get_content_type() == "text/plain" and not caption:
+        if not caption:
+            for part in msg.walk():
+                if part.get_content_type() == "text/plain":
                     try:
                         caption = extract_caption(part.get_payload(decode=True).decode(errors="replace"))
                     except Exception:
                         pass
-                continue
-            fn = part.get_filename() or ""
-            if not fn.lower().endswith(exts):
-                continue
-            dest = os.path.join(folder, fn)
-            if os.path.exists(dest):          # already have it — don't duplicate
+                    break
+        sdate = parse_subject_date(subject)
+
+        for filename, data in iter_media_parts(msg):
+            dest = save_media_bytes(data, filename, cfg, sender)
+            if dest is None:                  # already had it (or error)
                 skipped_existing += 1
                 continue
-            try:
-                os.makedirs(folder, exist_ok=True)
-                with open(dest, "wb") as f:
-                    f.write(part.get_payload(decode=True))
-                log_media(dest, sender, sdate or get_file_date(dest), caption or "")
-                saved += 1
-                print(f"  saved: {dest}")
-            except Exception as e:
-                print(f"  ERROR saving {fn}: {e}")
+            log_media(dest, sender, sdate or get_file_date(dest), caption or "")
+            saved += 1
+            print(f"  saved: {dest}")
 
     m.logout()
     print(f"\nDone. saved {saved} new photo(s); {skipped_existing} already had; "

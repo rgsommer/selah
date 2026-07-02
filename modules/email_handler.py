@@ -82,60 +82,55 @@ def check_for_new_emails(config, screens):
                 # The subject line is the caption shown under the photo; the
                 # email body is only a fallback when the subject is empty.
                 caption = _subject_caption(subject)
-                has_attachment = False
-                for part in msg.walk():
-                    content_type = part.get_content_type()
-                    if content_type == "text/plain" and not caption:
+                if not caption:
+                    for part in msg.walk():
+                        if part.get_content_type() == "text/plain":
+                            try:
+                                caption = extract_caption(
+                                    part.get_payload(decode=True).decode(errors="replace"))
+                            except Exception:
+                                pass
+                            break
+
+                # Photos are detected by content-type (catches inline + HEIC).
+                replied = False
+                for filename, data in iter_media_parts(msg):
+                    file_path = save_media_bytes(data, filename, config, sender)
+                    if not file_path:
+                        continue
+                    # A dated greeting (date in the subject) is scheduled for
+                    # its day; explicit year -> that year only, else every year.
+                    if subject_date:
                         try:
-                            body = part.get_payload(decode=True).decode(errors="replace")
-                            caption = extract_caption(body)
-                        except Exception:
-                            pass
-                    if part.get_content_disposition() == "attachment":
-                        filename = part.get_filename()
-                        if filename and filename.lower().endswith(
-                            tuple(config.get("valid_extensions", []))
-                        ):
-                            file_path = save_attachment(part, config, sender)
-                            if file_path:
-                                has_attachment = True
-                                # A dated greeting (date in the subject) still
-                                # gets scheduled to show on that day.
-                                if subject_date:
-                                    try:
-                                        from modules.scheduled_media import add_scheduled
-                                        # Explicit year in the subject -> that year
-                                        # only; no year -> recurs every year.
-                                        recurring = not _subject_has_year(subject)
-                                        add_scheduled(
-                                            file_path, subject_date.strftime("%m-%d"),
-                                            caption=caption, recurring=recurring,
-                                            target_iso=subject_date.isoformat())
-                                    except Exception as e:
-                                        log_error(f"Greeting schedule failed: {e}")
-                                final_date = date or get_file_date(file_path)
-                                queue_media(file_path, final_date, caption, config)
-                                send_auto_reply(sender, config, final_date)
-                                # Lazy imports to avoid circular dependencies
-                                try:
-                                    from modules.leaderboard import update_leaderboard
-                                    update_leaderboard(sender, 1)
-                                except Exception:
-                                    pass
-                                try:
-                                    from modules.cloud_backup import backup_to_drive
-                                    if config.get("cloud_backup_enabled", False):
-                                        backup_to_drive(file_path, config)
-                                except Exception:
-                                    pass
-                                try:
-                                    # Subtle 👀 beside the clock instead of a
-                                    # full-width "New photo from ..." banner.
-                                    from modules.new_photo_hint import note_new_photo
-                                    note_new_photo(kind="email")
-                                except Exception:
-                                    pass
-                                log_media(file_path, sender, final_date, caption)
+                            from modules.scheduled_media import add_scheduled
+                            add_scheduled(
+                                file_path, subject_date.strftime("%m-%d"),
+                                caption=caption, recurring=not _subject_has_year(subject),
+                                target_iso=subject_date.isoformat())
+                        except Exception as e:
+                            log_error(f"Greeting schedule failed: {e}")
+                    final_date = date or get_file_date(file_path)
+                    queue_media(file_path, final_date, caption, config)
+                    if not replied:                      # one reply per email
+                        send_auto_reply(sender, config, final_date)
+                        replied = True
+                    try:
+                        from modules.leaderboard import update_leaderboard
+                        update_leaderboard(sender, 1)
+                    except Exception:
+                        pass
+                    try:
+                        from modules.cloud_backup import backup_to_drive
+                        if config.get("cloud_backup_enabled", False):
+                            backup_to_drive(file_path, config)
+                    except Exception:
+                        pass
+                    try:
+                        from modules.new_photo_hint import note_new_photo
+                        note_new_photo(kind="email")
+                    except Exception:
+                        pass
+                    log_media(file_path, sender, final_date, caption)
 
             mail.logout()
             break
@@ -326,6 +321,61 @@ def _sender_folder(sender):
     parts = re.findall(r"[A-Za-z0-9]+", label)
     folder = "".join(p[:1].upper() + p[1:] for p in parts)
     return folder or "unknown"
+
+
+_IMG_MIME_EXT = {
+    "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png",
+    "image/heic": ".heic", "image/heif": ".heif", "image/gif": ".gif",
+    "image/webp": ".webp", "image/bmp": ".bmp",
+}
+_VID_MIME_EXT = {
+    "video/mp4": ".mp4", "video/quicktime": ".mov", "video/x-msvideo": ".avi",
+}
+
+
+def iter_media_parts(msg, min_image_bytes=15000):
+    """Yield (filename, bytes) for photo/video parts, detected by content-type
+    so inline images and HEIC files are caught (not just 'attachment' parts).
+    Tiny images (email-signature logos, tracking pixels) are skipped."""
+    idx = 0
+    for part in msg.walk():
+        if part.get_content_maintype() == "multipart":
+            continue
+        ctype = (part.get_content_type() or "").lower()
+        ext = _IMG_MIME_EXT.get(ctype) or _VID_MIME_EXT.get(ctype)
+        if not ext:
+            continue
+        try:
+            data = part.get_payload(decode=True)
+        except Exception:
+            data = None
+        if not data:
+            continue
+        if ctype in _IMG_MIME_EXT and len(data) < min_image_bytes:
+            continue  # skip signature logos / pixels
+        fn = part.get_filename()
+        if not fn or not fn.lower().endswith(tuple(list(_IMG_MIME_EXT.values()) +
+                                                   list(_VID_MIME_EXT.values()))):
+            idx += 1
+            fn = f"photo_{idx}{ext}"
+        yield fn, data
+
+
+def save_media_bytes(data, filename, config, sender=None):
+    """Write photo/video bytes under media/email/<sender>/, avoiding overwrite.
+    Returns the saved path, or None if a same-named file already exists."""
+    try:
+        folder = Path(config.get("email_dir", "media/email")) / _sender_folder(sender)
+        folder.mkdir(parents=True, exist_ok=True)
+        dest = folder / filename
+        if dest.exists():
+            return None                       # already have it — don't duplicate
+        with open(dest, "wb") as f:
+            f.write(data)
+        return str(dest)
+    except Exception as e:
+        log_error(f"Failed to save media: {e}", critical=False, config=config)
+        return None
 
 
 def save_attachment(part, config, sender=None):
