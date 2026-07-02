@@ -29,6 +29,7 @@ from modules.config_utils import load_config
 from modules.email_handler import (
     _is_bounce, _subject_caption, parse_subject_date, extract_caption,
     get_file_date, log_media, iter_media_parts, save_media_bytes, send_auto_reply,
+    _sender_folder,
 )
 
 
@@ -89,23 +90,27 @@ def main():
                     break
         sdate = parse_subject_date(subject)
 
-        had_media = False
+        photo_paths = []
         for filename, data in iter_media_parts(msg):
-            had_media = True
             dest = save_media_bytes(data, filename, cfg, sender)
-            if dest is None:                  # already had it (or error)
+            if dest is None:                  # already had it
                 skipped_existing += 1
+                existing = os.path.join(cfg.get("email_dir", "media/email"),
+                                        _sender_folder(sender), filename)
+                if os.path.exists(existing):
+                    photo_paths.append(existing)
                 continue
             log_media(dest, sender, sdate or get_file_date(dest), caption or "")
             saved += 1
+            photo_paths.append(dest)
             print(f"  saved: {dest}")
-        # Reply to any email that contained a photo (not just newly-saved ones),
-        # so already-imported submissions can still be acknowledged.
-        if had_media and do_reply:
+        # Reply to any email that contained a photo (new or already-imported),
+        # with thumbnails of that email's photos.
+        if photo_paths and do_reply:
             try:
-                send_auto_reply(sender, cfg, sdate)
+                send_auto_reply(sender, cfg, sdate, photo_paths)
                 replies += 1
-                print(f"  replied to: {sender}")
+                print(f"  replied to: {sender} ({len(photo_paths)} photo(s))")
             except Exception as e:
                 print(f"  reply failed to {sender}: {e}")
 

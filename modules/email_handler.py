@@ -5,7 +5,11 @@ import imaplib
 import smtplib
 import email
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.image import MIMEImage
 from email.utils import parsedate_to_datetime, parseaddr
+import io
+import modules.heif_support  # noqa: F401  (HEIC thumbnails)
 from pathlib import Path
 import re
 import datetime
@@ -93,11 +97,13 @@ def check_for_new_emails(config, screens):
                             break
 
                 # Photos are detected by content-type (catches inline + HEIC).
-                replied = False
+                saved_paths = []
+                final_date = date
                 for filename, data in iter_media_parts(msg):
                     file_path = save_media_bytes(data, filename, config, sender)
                     if not file_path:
                         continue
+                    saved_paths.append(file_path)
                     # A dated greeting (date in the subject) is scheduled for
                     # its day; explicit year -> that year only, else every year.
                     if subject_date:
@@ -111,9 +117,6 @@ def check_for_new_emails(config, screens):
                             log_error(f"Greeting schedule failed: {e}")
                     final_date = date or get_file_date(file_path)
                     queue_media(file_path, final_date, caption, config)
-                    if not replied:                      # one reply per email
-                        send_auto_reply(sender, config, final_date)
-                        replied = True
                     try:
                         from modules.leaderboard import update_leaderboard
                         update_leaderboard(sender, 1)
@@ -131,6 +134,10 @@ def check_for_new_emails(config, screens):
                     except Exception:
                         pass
                     log_media(file_path, sender, final_date, caption)
+
+                # One formatted reply per email, with all the thumbnails.
+                if saved_paths:
+                    send_auto_reply(sender, config, final_date, saved_paths)
 
             mail.logout()
             break
@@ -416,61 +423,60 @@ def queue_media(file_path, date, caption, config):
 
 
 DID_YOU_KNOW = """
-
 — Did you know? —
 • There's a leaderboard! The more photos you send, the higher you climb.
 • Your SUBJECT line becomes the caption shown under your photo — so make it a good one.
-• Put a date in the subject and we'll re-show your photo on that day — every hour,
-  in turn with everyone else's greetings:
-      Happy Birthday, Liam Aug 9          (recurs EVERY year)
+• Put a date in the subject and we'll re-show your photo on that day, every hour:
+      Happy Birthday, Liam Aug 9              (recurs EVERY year)
       Happy Mother's Day, 2nd Sunday of May   (recurs EVERY year)
-      Merry Christmas 2026-12-25          (that year ONLY — it has a year)
-  No year = every year (great for birthdays/anniversaries); add a year for a one-time show.
+      Merry Christmas 2026-12-25              (that year ONLY — it has a year)
+  No year = every year; add a year for a one-time show.
 
 Keep them coming — we love seeing your photos up on the display!
 - The Selah Family Display
 """
 
+_DYK_HTML = """
+<div style="margin-top:22px;padding:16px 18px;background:#f4f1ea;border-radius:12px;
+            border:1px solid #e6e0d4;font-size:14px;color:#4a4a4a;line-height:1.55">
+  <div style="font-weight:700;color:#b5651d;margin-bottom:8px">Did you know?</div>
+  <ul style="margin:0;padding-left:18px">
+    <li>There's a <b>leaderboard</b> — the more photos you send, the higher you climb.</li>
+    <li>Your <b>subject line</b> becomes the caption shown under your photo.</li>
+    <li>Put a date in the subject and we'll re-show it on that day, <b>every hour</b>:
+      <div style="margin:6px 0 0;font-family:monospace;font-size:13px;color:#555">
+        Happy Birthday, Liam Aug 9 &nbsp;<span style="color:#999">(every year)</span><br>
+        Merry Christmas 2026-12-25 &nbsp;<span style="color:#999">(that year only)</span>
+      </div>
+      <div style="margin-top:4px;color:#777">No year = every year; add a year for a one-time show.</div>
+    </li>
+  </ul>
+</div>
+"""
 
-def send_auto_reply(sender, config, date):
-    """Send auto-reply to contributor."""
-    if not config.get("email_address") or not config.get("email_password"):
-        return
-    try:
-        message = get_custom_response(sender, date, config) + DID_YOU_KNOW
-        msg = MIMEText(message)
-        msg["Subject"] = "Selah Submission Received"
-        msg["From"] = config["email_address"]
-        msg["To"] = sender
 
-        with smtplib.SMTP(config["smtp_server"], config["smtp_port"]) as server:
-            server.starttls()
-            server.login(config["email_address"], config["email_password"])
-            server.send_message(msg)
-    except Exception as e:
-        log_error(f"Failed to send auto-reply: {e}", critical=False, config=config)
-
-
-def _base_reply(date):
-    """The plain-language 'what happens next' line for the confirmation email."""
+def _base_reply(date, count=1):
+    """Plain 'what happens next' line, pluralised for the number of photos."""
+    word = "photo" if count == 1 else f"{count} photos"
+    verb = "is" if count == 1 else "are"
     if date:
-        return ("Thank you! Your photo is saved and will appear on "
-                f"{date} — shown that day every hour, in turn with everyone "
-                "else's greetings and that day's memories.")
-    return ("Thank you! Your photo will appear on the display shortly, "
-            "and again from time to time as the slideshow cycles.")
+        return (f"Thank you! Your {word} {verb} saved and will appear on {date} — "
+                "shown that day every hour, in turn with everyone else's greetings "
+                "and that day's memories.")
+    return (f"Thank you! Your {word} will appear on the display shortly, and again "
+            "from time to time as the slideshow cycles.")
 
 
-def get_custom_response(sender, date, config):
-    """Get custom email response from templates."""
+def get_custom_response(sender, date, config, count=1):
+    """Get the confirmation body (custom template, else the plural base line)."""
     try:
         if not config.get("custom_email_responses", False):
-            return _base_reply(date)
+            return _base_reply(date, count)
         try:
             with open("email_responses.json", "r") as f:
                 responses = json.load(f)
         except FileNotFoundError:
-            return _base_reply(date)
+            return _base_reply(date, count)
 
         for response in responses:
             condition = response.get("condition", "")
@@ -483,9 +489,90 @@ def get_custom_response(sender, date, config):
                 return msg_template
             if condition == "default":
                 return msg_template.replace("{date}", str(date or "immediate display"))
-        return _base_reply(date)
+        return _base_reply(date, count)
     except Exception:
-        return _base_reply(date)
+        return _base_reply(date, count)
+
+
+def _thumbnail_bytes(path, size=170):
+    """A small JPEG thumbnail of a photo (upright), or None for videos/failures."""
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(path) as im:
+            im = ImageOps.exif_transpose(im).convert("RGB")
+            im.thumbnail((size, size))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=80)
+            return buf.getvalue()
+    except Exception:
+        return None
+
+
+def send_auto_reply(sender, config, date, photos=None):
+    """Send a formatted confirmation, plural-aware, with thumbnails of the
+    submitted photos inline."""
+    if not config.get("email_address") or not config.get("email_password"):
+        return
+    photos = photos or []
+    count = len(photos) or 1
+    owner = config["email_address"]
+    try:
+        body = get_custom_response(sender, date, config, count)
+
+        # Build inline thumbnails (skip videos / unreadable).
+        thumbs = []
+        for p in photos:
+            data = _thumbnail_bytes(p)
+            if data:
+                thumbs.append(data)
+
+        root = MIMEMultipart("related")
+        root["Subject"] = "Selah Submission Received"
+        root["From"] = owner
+        root["To"] = sender
+
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(body + "\n" + DID_YOU_KNOW, "plain"))
+
+        thumb_html = ""
+        if thumbs:
+            imgs = "".join(
+                f'<img src="cid:thumb{i}" width="150" '
+                'style="border-radius:10px;margin:5px;border:4px solid #fff;'
+                'box-shadow:0 2px 6px rgba(0,0,0,.25);vertical-align:top">'
+                for i in range(len(thumbs)))
+            thumb_html = f'<div style="margin:18px 0;text-align:center">{imgs}</div>'
+
+        html = f"""\
+<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+            max-width:560px;margin:0 auto;color:#333">
+  <div style="background:linear-gradient(135deg,#b5651d,#d98b3f);color:#fff;
+              padding:20px 22px;border-radius:14px 14px 0 0">
+    <div style="font-size:22px;font-weight:700">📷 Got it — thank you!</div>
+    <div style="opacity:.9;font-size:14px;margin-top:2px">The Selah Family Display</div>
+  </div>
+  <div style="padding:20px 22px;background:#fff;border:1px solid #eee;border-top:0;
+              border-radius:0 0 14px 14px">
+    <p style="font-size:15px;line-height:1.6;margin:0">{body}</p>
+    {thumb_html}
+    {_DYK_HTML}
+  </div>
+</div>"""
+        alt.attach(MIMEText(html, "html"))
+        root.attach(alt)
+
+        for i, data in enumerate(thumbs):
+            img = MIMEImage(data, "jpeg")
+            img.add_header("Content-ID", f"<thumb{i}>")
+            img.add_header("Content-Disposition", "inline", filename=f"thumb{i}.jpg")
+            root.attach(img)
+
+        with smtplib.SMTP(config["smtp_server"], config["smtp_port"]) as server:
+            server.starttls()
+            server.login(owner, config["email_password"])
+            server.send_message(root)
+    except Exception as e:
+        log_error(f"Failed to send auto-reply: {e}", critical=False, config=config)
 
 
 def load_approved_senders(path="approved_senders.json"):
