@@ -22,6 +22,7 @@ _KEYS = [
     ("F8", "Feature new photos from the last few days"),
     ("F9", "Displays off (+1 hr/press, up to 6; nav wakes)"),
     ("F10", "Edit a photo's caption — pick its number"),
+    ("F11", "Show the 'scan to add a photo' QR code"),
     ("Del", "Delete a photo — pick its number, then code"),
     ("H  or  ?", "This help"),
     ("Esc", "Quit"),

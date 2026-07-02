@@ -41,13 +41,13 @@ def _upload_url(config):
     return f"http://{_local_ip()}:{port}/upload"
 
 
-def _build_qr(url):
+def _build_qr(url, target_px=220):
     qr = qrcode.QRCode(border=2, box_size=1)
     qr.add_data(url)
     qr.make(fit=True)
     matrix = qr.get_matrix()
     n = len(matrix)
-    scale = max(3, 220 // max(1, n))
+    scale = max(3, target_px // max(1, n))
     size = n * scale
     surf = pygame.Surface((size, size))
     surf.fill((255, 255, 255))
@@ -80,6 +80,82 @@ def show_upload_qr_if_scheduled(screens, config):
 
     for screen in screens.values():
         _render_qr(screen, _qr_surface)
+
+
+def show_upload_qr_now(screens, config, seconds=60):
+    """On-demand (F11): a big centred QR + URL shown until any key/tap or until
+    `seconds` elapse. Ensures the web server is up so the link actually works."""
+    if not HAS_QR:
+        try:
+            from modules.toast import queue_toast
+            queue_toast("QR needs the 'qrcode' package")
+        except Exception:
+            pass
+        return
+    # Make sure the server backing the link is running (idempotent).
+    try:
+        from modules.web_control import start_web_server
+        start_web_server(config, screens)
+    except Exception:
+        pass
+
+    url = _upload_url(config)
+    try:
+        big = _build_qr(url, target_px=360)
+    except Exception as e:
+        log_error(f"QR build failed: {e}")
+        return
+
+    end = time.time() + max(3, int(seconds))
+    clock = pygame.time.Clock()
+    pygame.event.clear()
+    while time.time() < end:
+        for event in pygame.event.get():
+            if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN,
+                              pygame.FINGERDOWN, pygame.QUIT):
+                return
+        for screen in screens.values():
+            _render_qr_center(screen, big, url)
+        try:
+            pygame.display.flip()
+        except Exception:
+            pass
+        clock.tick(20)
+
+
+def _render_qr_center(screen, qr_surf, url):
+    try:
+        w, h = screen.get_size()
+        qs = qr_surf.get_width()
+        title_font = pygame.font.Font(None, max(30, w // 22))
+        url_font = pygame.font.Font(None, max(20, w // 46))
+        title = title_font.render("Scan to add a photo", True, (255, 255, 255))
+        sub = url_font.render(url, True, (200, 200, 210))
+        hint = url_font.render("press any key to close", True, (150, 150, 165))
+
+        pad = 28
+        inner_w = max(qs, title.get_width(), sub.get_width())
+        box_w = inner_w + pad * 2
+        box_h = title.get_height() + qs + sub.get_height() + hint.get_height() + pad * 2 + 40
+        bx, by = (w - box_w) // 2, (h - box_h) // 2
+
+        dim = pygame.Surface((w, h), pygame.SRCALPHA)
+        dim.fill((0, 0, 0, 185))
+        screen.blit(dim, (0, 0))
+        card = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        card.fill((22, 22, 30, 245))
+        screen.blit(card, (bx, by))
+
+        y = by + pad
+        screen.blit(title, (bx + (box_w - title.get_width()) // 2, y))
+        y += title.get_height() + 16
+        screen.blit(qr_surf, (bx + (box_w - qs) // 2, y))
+        y += qs + 14
+        screen.blit(sub, (bx + (box_w - sub.get_width()) // 2, y))
+        y += sub.get_height() + 8
+        screen.blit(hint, (bx + (box_w - hint.get_width()) // 2, y))
+    except Exception as e:
+        log_error(f"QR centre render failed: {e}")
 
 
 def _render_qr(screen, qr_surf):

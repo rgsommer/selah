@@ -1323,6 +1323,14 @@ def main():
                                     show_toast_if_needed(
                                         screens, config,
                                         "Caption updated" if n else "Couldn't save caption")
+                    elif event.key == pygame.K_F11:
+                        # Show the phone-upload QR on demand (big, centred).
+                        try:
+                            from modules.upload_qr import show_upload_qr_now
+                            show_upload_qr_now(screens, config, seconds=60)
+                        except Exception as e:
+                            log_error(f"F11 QR failed: {e}")
+                        state["nav_request"] = 1   # re-render after it closes
                     elif event.key in (pygame.K_h, pygame.K_QUESTION) or event.unicode == "?":
                         from modules.help_overlay import show_help
                         target = screens.get("landscape") or screens.get("portrait")
