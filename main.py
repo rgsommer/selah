@@ -1173,19 +1173,26 @@ def main():
                         _nav_history(_screen, _stype, _files, state, config, media_log, _dir)
                         state.setdefault(_stype, {})["paused_until"] = current_ts + pause_for
 
-            # ---- MANUAL BLACKOUT (F9): displays fully off for a set time ----
+            # ---- MANUAL BLACKOUT (F9): displays to standby for a set time ----
+            # Uses DPMS (layout-safe) — never touches the xrandr arrangement, so
+            # it can't mirror the screens.
             if current_ts < state.get("blackout_until", 0):
-                state["blackout_active"] = True
-                _set_all_hdmi(config, screens, on=False)
-                for screen in screens.values():
+                if not state.get("blackout_active"):
+                    state["blackout_active"] = True
+                    for screen in screens.values():   # paint black once, then standby
+                        try:
+                            screen.fill((0, 0, 0))
+                        except Exception:
+                            pass
                     try:
-                        screen.fill((0, 0, 0))
+                        pygame.display.flip()
                     except Exception:
                         pass
-                try:
-                    pygame.display.flip()
-                except Exception:
-                    pass
+                    try:
+                        from modules.screen_power import screen_off
+                        screen_off()
+                    except Exception:
+                        pass
                 # Keep intake alive while dark so submissions still land.
                 if current_ts - last_email_check > email_check_interval:
                     try:
@@ -1197,7 +1204,11 @@ def main():
                 continue
             elif state.get("blackout_active"):
                 state["blackout_active"] = False
-                _set_all_hdmi(config, screens, on=True)   # power back on, in place
+                try:
+                    from modules.screen_power import screen_on
+                    screen_on()
+                except Exception:
+                    pass
                 show_toast_if_needed(screens, config, "Welcome back")
 
             # ---- NIGHT MODE ----

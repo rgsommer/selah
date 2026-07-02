@@ -85,7 +85,7 @@ DEFAULT_CONFIG = {
     "screen2_display_id": 7,         # vcgencmd id for screen 2 (Pi4 HDMI-1 = 7)
     "screen1_output": "HDMI-1",      # xrandr connector for screen 1 (KMS per-output off)
     "screen2_output": "HDMI-2",      # xrandr connector for screen 2
-    "enforce_dual_layout": True,     # assert side-by-side at startup (heals a mirrored X)
+    "enforce_dual_layout": False,    # opt-in: assert side-by-side at startup (heals a mirrored X)
     "night_portrait_off": True,
     "night_info_screen": "landscape",
     "night_sunrise_enabled": True,

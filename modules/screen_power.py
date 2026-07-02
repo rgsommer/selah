@@ -94,25 +94,23 @@ def prevent_sleep():
 
 
 def screen_off():
-    """Blank the HDMI output (no backlight). Idempotent."""
+    """Put the monitors into standby via DPMS. Layout-safe (does NOT touch the
+    xrandr arrangement, so it can never mirror the outputs). Idempotent."""
     if _state["off"]:
         return
-    # vcgencmd is gentlest (backlight only, keeps the framebuffer); then DPMS.
-    _run("vcgencmd display_power 0")
+    # prevent_sleep() disables DPMS; re-enable it so 'force off' actually blanks.
+    _run("xset +dpms")
     _run("xset dpms force off")
-    _run("wlr-randr --output HDMI-A-1 --off")
-    _run("wlr-randr --output HDMI-A-2 --off")
+    _run("vcgencmd display_power 0")   # legacy fallback; no-op under KMS
     _state["off"] = True
-    print("[Selah] HDMI blanked (night)")
+    print("[Selah] Displays to standby (DPMS)")
 
 
 def screen_on():
-    """Restore the HDMI output. Idempotent."""
+    """Wake the monitors from DPMS standby. Layout-safe. Idempotent."""
     if not _state["off"]:
         return
-    _run("vcgencmd display_power 1")
     _run("xset dpms force on")
-    _run("wlr-randr --output HDMI-A-1 --on")
-    _run("wlr-randr --output HDMI-A-2 --on")
+    _run("vcgencmd display_power 1")
     _state["off"] = False
-    print("[Selah] HDMI restored")
+    print("[Selah] Displays woken (DPMS)")
