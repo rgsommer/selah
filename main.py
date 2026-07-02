@@ -322,8 +322,18 @@ def _queue_feature_by_orientation(items, screens, portrait_files, landscape_file
     photo_types = [t for t in screens if t.startswith(("portrait", "landscape"))]
     if not photo_types:
         return 0
-    p_types = [t for t in photo_types if t.startswith("portrait")]
-    l_types = [t for t in photo_types if t.startswith("landscape")]
+    # Classify each SCREEN by its ACTUAL surface dimensions, not its name — a
+    # software-rotated portrait screen has a tall (h>w) surface. This is the
+    # robust source of truth; names can be misleading.
+    p_types, l_types = [], []
+    for t in photo_types:
+        try:
+            w, h = screens[t].get_size()
+        except Exception:
+            w, h = 1, 1
+        (p_types if h > w else l_types).append(t)
+        log_error(f"[F8] screen '{t}' size {w}x{h} -> "
+                  f"{'PORTRAIT' if h > w else 'LANDSCAPE'} screen")
     # Which screen a portrait vs a landscape photo should target.
     port_target = l_types if opposite else p_types
     land_target = p_types if opposite else l_types
@@ -341,13 +351,14 @@ def _queue_feature_by_orientation(items, screens, portrait_files, landscape_file
             return False
 
     buckets = {t: [] for t in photo_types}
+    nport = nland = 0
     for path, caption in items:                       # newest first
-        if _is_port(path) and port_target:
-            targets = port_target
-        elif (not _is_port(path)) and land_target:
-            targets = land_target
-        else:                                         # no screen of that orientation
-            targets = photo_types
+        if _is_port(path):
+            nport += 1
+            targets = port_target or photo_types
+        else:
+            nland += 1
+            targets = land_target or photo_types
         t = min(targets, key=lambda x: len(buckets[x]))   # balance same-orient screens
         buckets[t].append((path, caption))
 
@@ -357,6 +368,9 @@ def _queue_feature_by_orientation(items, screens, portrait_files, landscape_file
         if lst:
             fbs[t] = deque(lst)
             total += len(lst)
+    log_error(f"[F8] opposite={opposite}; portrait photos->{port_target}, "
+              f"landscape photos->{land_target}; classified {nport} portrait / "
+              f"{nland} landscape; queued " + ", ".join(f"{t}:{len(b)}" for t, b in buckets.items()))
     return total
 
 
