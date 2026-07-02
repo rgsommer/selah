@@ -374,6 +374,34 @@ def _queue_feature_by_orientation(items, screens, portrait_files, landscape_file
     return total
 
 
+def _draw_blackout_preview(screens, hours):
+    """Show the accumulating F9 blackout stack on the (still-on) screens."""
+    for stype, screen in screens.items():
+        if not stype.startswith(("portrait", "landscape")):
+            continue
+        try:
+            w, h = screen.get_size()
+            big = pygame.font.Font(None, max(48, w // 16))
+            small = pygame.font.Font(None, max(24, w // 42))
+            l1 = big.render(f"Displays off: {hours} hour{'s' if hours != 1 else ''}",
+                            True, (255, 214, 10))
+            l2 = small.render("F9 = +1 hour   ·   Space / arrow = cancel",
+                              True, (225, 225, 225))
+            pw = max(l1.get_width(), l2.get_width()) + 60
+            ph = l1.get_height() + l2.get_height() + 48
+            panel = pygame.Surface((pw, ph), pygame.SRCALPHA)
+            panel.fill((0, 0, 0, 205))
+            panel.blit(l1, ((pw - l1.get_width()) // 2, 18))
+            panel.blit(l2, ((pw - l2.get_width()) // 2, 18 + l1.get_height() + 16))
+            screen.blit(panel, ((w - pw) // 2, (h - ph) // 2))
+        except Exception:
+            pass
+    try:
+        pygame.display.flip()
+    except Exception:
+        pass
+
+
 def _set_all_hdmi(config, screens, on):
     """Power every photo screen's HDMI off (F9 blackout) or restore the canonical
     side-by-side layout (wake). Restore uses --right-of so it can't mirror."""
@@ -1115,11 +1143,15 @@ def main():
             # F-key actions (live in main.py because they call its UIs).
             for event in events:
                 if event.type == pygame.KEYDOWN:
-                    # An F9 blackout is woken early by any nav/space press.
-                    if state.get("blackout_until", 0) > current_ts and event.key in (
+                    # An F9 blackout (or its preview) is cancelled by any nav/space
+                    # press — wakes the screens and clears the stack.
+                    if (state.get("blackout_until", 0) > current_ts
+                            or state.get("blackout_show_until", 0) > current_ts) and event.key in (
                             pygame.K_SPACE, pygame.K_LEFT, pygame.K_RIGHT,
                             pygame.K_UP, pygame.K_DOWN):
                         state["blackout_until"] = 0
+                        state["blackout_show_until"] = 0
+                        state["blackout_hours"] = 0
                         continue
                     if event.key == pygame.K_ESCAPE:
                         print("[Selah] ESC pressed - shutting down.")
@@ -1243,16 +1275,20 @@ def main():
                         except Exception as e:
                             log_error(f"F8 feature-recent failed: {e}")
                     elif event.key == pygame.K_F9:
-                        # Pause + turn the displays off for a while: +1 hour per
-                        # press, capped at 6 hours total from now.
-                        cap = current_ts + 6 * 3600
-                        base = max(current_ts, state.get("blackout_until", 0))
-                        state["blackout_until"] = min(base + 3600, cap)
-                        hrs = max(1, round((state["blackout_until"] - current_ts) / 3600))
-                        show_toast_if_needed(
-                            screens, config,
-                            f"Displays off for {hrs} hour{'s' if hrs != 1 else ''} "
-                            "(F9 to add, Space/arrow to wake)")
+                        # Stack an hour (cap 6) and show the running total on-screen
+                        # for a few seconds; the blackout applies once the preview
+                        # window elapses. Pressing F9 while already blanked wakes the
+                        # screens and re-arms so you can see/adjust the stack.
+                        if state.get("blackout_active"):
+                            try:
+                                from modules.screen_power import screen_on
+                                screen_on()
+                            except Exception:
+                                pass
+                            state["blackout_active"] = False
+                        state["blackout_hours"] = min(6, state.get("blackout_hours", 0) + 1)
+                        state["blackout_show_until"] = current_ts + 5   # preview window
+                        state["blackout_until"] = 0                     # commit after preview
                     elif event.key in (pygame.K_h, pygame.K_QUESTION) or event.unicode == "?":
                         from modules.help_overlay import show_help
                         target = screens.get("landscape") or screens.get("portrait")
@@ -1281,6 +1317,17 @@ def main():
             # ---- MANUAL BLACKOUT (F9): displays to standby for a set time ----
             # Uses DPMS (layout-safe) — never touches the xrandr arrangement, so
             # it can't mirror the screens.
+            # 1) Preview window: show the accumulating stack, screens stay ON.
+            if current_ts < state.get("blackout_show_until", 0):
+                _draw_blackout_preview(screens, state.get("blackout_hours", 1))
+                _responsive_sleep(0.4)   # responsive to more F9 presses / cancel
+                continue
+            # 2) Preview elapsed but not yet committed -> apply the blackout now.
+            if (state.get("blackout_hours", 0) > 0
+                    and not state.get("blackout_until", 0)
+                    and not state.get("blackout_active")):
+                state["blackout_until"] = current_ts + state["blackout_hours"] * 3600
+            # 3) Blanked window.
             if current_ts < state.get("blackout_until", 0):
                 if not state.get("blackout_active"):
                     state["blackout_active"] = True
@@ -1307,14 +1354,18 @@ def main():
                     last_email_check = current_ts
                 _responsive_sleep(5)   # stays responsive to F9-again / wake keys
                 continue
-            elif state.get("blackout_active"):
+            elif state.get("blackout_active") or state.get("blackout_hours", 0):
+                # Ended (timer elapsed) or cancelled -> wake and reset the stack.
+                if state.get("blackout_active"):
+                    try:
+                        from modules.screen_power import screen_on
+                        screen_on()
+                    except Exception:
+                        pass
+                    show_toast_if_needed(screens, config, "Welcome back")
                 state["blackout_active"] = False
-                try:
-                    from modules.screen_power import screen_on
-                    screen_on()
-                except Exception:
-                    pass
-                show_toast_if_needed(screens, config, "Welcome back")
+                state["blackout_hours"] = 0
+                state["blackout_until"] = 0
 
             # ---- NIGHT MODE ----
             if is_display_off(current_time, config):
