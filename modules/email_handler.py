@@ -317,11 +317,15 @@ def _is_bounce(sender, subject, msg):
 
 
 def _sender_folder(sender):
-    """A filesystem-safe folder name for a sender ('Laura Sommer' or local part)."""
+    """A filesystem-safe folder name for a sender, spaces removed and each word
+    capitalised: 'Laura Sommer' -> 'LauraSommer', 'evan.e.sommer' -> 'EvanESommer'."""
     name, addr = parseaddr(sender or "")
-    label = (name or "").strip() or (addr.split("@")[0] if addr else "")
-    label = re.sub(r"[^\w .\-]", "", label).strip().rstrip(".")
-    return label or "unknown"
+    label = (name or "").strip()
+    if not label and addr:
+        label = re.sub(r"[._]+", " ", addr.split("@")[0])
+    parts = re.findall(r"[A-Za-z0-9]+", label)
+    folder = "".join(p[:1].upper() + p[1:] for p in parts)
+    return folder or "unknown"
 
 
 def save_attachment(part, config, sender=None):
