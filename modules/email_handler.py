@@ -44,6 +44,11 @@ def check_for_new_emails(config, screens):
                 sender = msg.get("from", "")
                 subject = msg.get("subject", "")
 
+                # Ignore bounce / delivery-failure notices — they carry Gmail's
+                # icon images that were being saved as junk "photos".
+                if _is_bounce(sender, subject, msg):
+                    continue
+
                 # Check for approval replies first
                 if _is_approval_reply(subject, msg, config):
                     continue
@@ -288,6 +293,27 @@ def extract_caption(body):
         return ""
     except Exception:
         return ""
+
+
+def _is_bounce(sender, subject, msg):
+    """True for delivery-failure / auto-generated system mail (mailer-daemon,
+    postmaster, DSN reports) — never a real photo submission."""
+    s = (sender or "").lower()
+    if "mailer-daemon" in s or "postmaster@" in s or "mail delivery subsystem" in s:
+        return True
+    subj = (subject or "").lower()
+    if any(k in subj for k in ("delivery status notification", "undelivered mail",
+                               "delivery incomplete", "failure notice",
+                               "returned mail", "mail delivery failed",
+                               "undeliverable")):
+        return True
+    try:
+        ctype = (msg.get_content_type() or "").lower()
+        if ctype in ("multipart/report",) or msg.get("auto-submitted", "").lower().startswith("auto"):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _sender_folder(sender):
