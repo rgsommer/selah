@@ -21,7 +21,7 @@ _KEYS = [
     ("F7", "Show today's 'On this day' memories"),
     ("F8", "Feature new photos from the last few days"),
     ("F9", "Displays off (+1 hr/press, up to 6; nav wakes)"),
-    ("Del", "Delete current photo (asks for code)"),
+    ("Del", "Delete a photo — pick its number, then code"),
     ("H  or  ?", "This help"),
     ("Esc", "Quit"),
     ("Tap / swipe", "Previous / next photo"),

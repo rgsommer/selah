@@ -431,6 +431,11 @@ def _render_frame(screen, frame, config, media_log):
             if f.lower().endswith(VIDEO_EXTS):
                 fd, cap = _get_media_metadata(f, media_log)
                 show_video(screen, f, config, fd, cap)
+                try:
+                    from modules.display_handler import set_photo_rects
+                    set_photo_rects(screen, [(f, pygame.Rect(0, 0, *screen.get_size()))])
+                except Exception:
+                    pass
             else:
                 fd, cap = ((None, cap_override) if cap_override is not None
                            else _get_media_metadata(f, media_log))
@@ -788,6 +793,78 @@ def _delete_to_trash(path):
         return False
 
 
+def _draw_number_badge(screen, rect, n):
+    """Draw a big yellow number badge in the top-left corner of a photo rect."""
+    try:
+        w, h = screen.get_size()
+        fs = max(48, min(rect.width, rect.height) // 4, w // 16)
+        font = pygame.font.Font(None, fs)
+        label = font.render(str(n), True, (20, 20, 20))
+        pad = fs // 4
+        bw, bh = label.get_width() + pad * 2, label.get_height() + pad * 2
+        # Anchor inside the photo's top-left, clamped to the screen.
+        bx = max(4, min(rect.left + 8, w - bw - 4))
+        by = max(4, min(rect.top + 8, h - bh - 4))
+        badge = pygame.Surface((bw, bh), pygame.SRCALPHA)
+        pygame.draw.rect(badge, (255, 214, 10, 235), (0, 0, bw, bh), border_radius=bh // 4)
+        pygame.draw.rect(badge, (40, 40, 40, 235), (0, 0, bw, bh), width=max(2, fs // 20),
+                         border_radius=bh // 4)
+        badge.blit(label, (pad, pad))
+        screen.blit(badge, (bx, by))
+    except Exception:
+        pass
+
+
+def _prompt_delete_number(screens, numbered):
+    """Overlay a yellow number on each displayed photo and let the user type the
+    one to delete. Keeps the photos visible while choosing. Returns the chosen
+    0-based index, or None if cancelled/invalid."""
+    photo_screens = [(t, s) for t, s in screens.items()
+                     if t.startswith(("portrait", "landscape"))]
+    hint_screen = screens.get("landscape") or screens.get("portrait")
+    clock = pygame.time.Clock()
+    pygame.event.clear()
+    entered = ""
+
+    def _redraw():
+        for i, (_scr_t, _scr, rect, _path) in enumerate(numbered, start=1):
+            _draw_number_badge(_scr, rect, i)
+        if hint_screen:
+            w, h = hint_screen.get_size()
+            font = pygame.font.Font(None, max(28, w // 34))
+            msg = (f"Delete which photo?  {entered or '—'}    "
+                   f"(1–{len(numbered)}, Enter, Esc)")
+            txt = font.render(msg, True, (255, 255, 255))
+            bar = pygame.Surface((txt.get_width() + 40, txt.get_height() + 24),
+                                 pygame.SRCALPHA)
+            bar.fill((0, 0, 0, 210))
+            bar.blit(txt, (20, 12))
+            hint_screen.blit(bar, ((w - bar.get_width()) // 2, h - bar.get_height() - 24))
+        try:
+            pygame.display.flip()
+        except Exception:
+            pass
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return None
+            if event.type != pygame.KEYDOWN:
+                continue
+            if event.key == pygame.K_ESCAPE:
+                return None
+            if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                if entered.isdigit() and 1 <= int(entered) <= len(numbered):
+                    return int(entered) - 1
+                entered = ""     # invalid — clear and let them retype
+            elif event.key == pygame.K_BACKSPACE:
+                entered = entered[:-1]
+            elif event.unicode and event.unicode.isdigit() and len(entered) < 3:
+                entered += event.unicode
+        _redraw()
+        clock.tick(30)
+
+
 def _responsive_sleep(seconds):
     """Sleep up to `seconds`, but return the instant an input event is queued so
     arrows / spacebar / F-keys / touch act immediately instead of waiting out
@@ -1070,25 +1147,39 @@ def main():
                                               "forecast": "5-day forecast",
                                               None: "Panel hidden"}[nxt])
                     elif event.key == pygame.K_DELETE:
-                        # Delete the current photo — PIN-protected.
+                        # Number every displayed photo, let the user pick which,
+                        # then confirm with the PIN — so it's unambiguous which
+                        # photo (and which screen) gets deleted.
                         if config.get("delete_enabled", True):
-                            cur = _get_now_showing()
+                            from modules.display_handler import get_photo_rects
+                            numbered = []   # (screen_type, screen, rect, path)
+                            for _st, _sc in screens.items():
+                                if _st.startswith(("portrait", "landscape")):
+                                    for _p, _r in get_photo_rects(_sc):
+                                        numbered.append((_st, _sc, _r, _p))
                             target = screens.get("landscape") or screens.get("portrait")
-                            if cur and target:
-                                from modules.pin_prompt import prompt_pin
-                                entered = prompt_pin(target, "Enter delete code")
-                                if entered is None:
-                                    pass  # cancelled
-                                elif entered == str(config.get("delete_pin", "8719")):
-                                    if _delete_to_trash(cur):
-                                        portrait_files[:] = [f for f in portrait_files if f != cur]
-                                        landscape_files[:] = [f for f in landscape_files if f != cur]
-                                        state["nav_request"] = 1  # advance off the deleted pic
-                                        show_toast_if_needed(screens, config, "Photo deleted")
-                                    else:
-                                        show_toast_if_needed(screens, config, "Delete failed")
+                            if not numbered:
+                                show_toast_if_needed(screens, config, "Nothing to delete")
+                            elif target:
+                                choice = _prompt_delete_number(screens, numbered)
+                                if choice is None:
+                                    state["nav_request"] = 1   # clear badges, move on
                                 else:
-                                    show_toast_if_needed(screens, config, "Wrong code")
+                                    cur = numbered[choice][3]
+                                    from modules.pin_prompt import prompt_pin
+                                    entered = prompt_pin(target, f"Delete photo {choice + 1} — enter code")
+                                    if entered is None:
+                                        state["nav_request"] = 1
+                                    elif entered == str(config.get("delete_pin", "8719")):
+                                        if _delete_to_trash(cur):
+                                            portrait_files[:] = [f for f in portrait_files if f != cur]
+                                            landscape_files[:] = [f for f in landscape_files if f != cur]
+                                            state["nav_request"] = 1  # advance off the deleted pic
+                                            show_toast_if_needed(screens, config, "Photo deleted")
+                                        else:
+                                            show_toast_if_needed(screens, config, "Delete failed")
+                                    else:
+                                        show_toast_if_needed(screens, config, "Wrong code")
                     elif event.key == pygame.K_F7:
                         # Show today's on-this-day memories now (queue them up).
                         try:

@@ -25,6 +25,21 @@ _last_monitor_check = 0
 _monitor_check_interval = 30  # seconds between re-checks
 _known_monitor_count = 0
 
+# Per-screen record of the photos currently shown and their on-screen rects,
+# so the delete flow can number each photo and map a number back to its file.
+# Keyed by id(screen surface): {id: [(path, pygame.Rect), ...]}.
+_last_photo_rects = {}
+
+
+def get_photo_rects(screen):
+    """The (path, rect) list for the photos currently shown on `screen`."""
+    return _last_photo_rects.get(id(screen), [])
+
+
+def set_photo_rects(screen, rects):
+    """Record what's shown on `screen` (used for the full-screen video case)."""
+    _last_photo_rects[id(screen)] = rects
+
 
 def _detect_monitors():
     """Detect connected monitors via xrandr. Returns list of dicts with name, w, h, x, y.
@@ -534,22 +549,26 @@ def _maybe_effect(surf, config, path=None):
 
 
 def _build_single_frame(screen, image_path, config, file_date, caption):
-    """Render one centered photo (with overlay/theme) onto an offscreen frame."""
+    """Render one centered photo (with overlay/theme) onto an offscreen frame.
+    Returns (frame, rects) where rects is [(path, pygame.Rect), ...]."""
     w, h = screen.get_size()
     frame = pygame.Surface((w, h))
     frame.fill((0, 0, 0))
+    rects = []
     img = _scaled_image(image_path, w, h)
     if img:
         img = _maybe_effect(img, config, image_path)
         iw, ih = img.get_size()
-        frame.blit(img, ((w - iw) // 2, (h - ih) // 2))
+        x, y = (w - iw) // 2, (h - ih) // 2
+        frame.blit(img, (x, y))
+        rects.append((image_path, pygame.Rect(x, y, iw, ih)))
     try:
         from modules.theme_manager import draw_theme_border
         draw_theme_border(frame)
     except Exception:
         pass
     _draw_overlay(frame, image_path, config, file_date, caption)
-    return frame
+    return frame, rects
 
 
 def _gutter_px(config, w):
@@ -565,7 +584,7 @@ def _gutter_px(config, w):
 
 
 def _build_grid_frame(screen, paths, cols, rows, config):
-    """Render a cols x rows photo collage onto an offscreen frame."""
+    """Render a cols x rows photo collage. Returns (frame, rects)."""
     w, h = screen.get_size()
     frame = pygame.Surface((w, h))
     frame.fill((0, 0, 0))
@@ -573,6 +592,7 @@ def _build_grid_frame(screen, paths, cols, rows, config):
     cell_w = (w - gap * (cols + 1)) // cols
     cell_h = (h - gap * (rows + 1)) // rows
 
+    rects = []
     n = 0
     for r in range(rows):
         for c in range(cols):
@@ -585,7 +605,9 @@ def _build_grid_frame(screen, paths, cols, rows, config):
                 if img:
                     img = _maybe_effect(img, config, paths[n])
                     iw, ih = img.get_size()
-                    frame.blit(img, (cx + (cell_w - iw) // 2, cy + (cell_h - ih) // 2))
+                    x, y = cx + (cell_w - iw) // 2, cy + (cell_h - ih) // 2
+                    frame.blit(img, (x, y))
+                    rects.append((paths[n], pygame.Rect(x, y, iw, ih)))
             except Exception as e:
                 log_error(f"Tile render failed for {paths[n]}: {e}")
             n += 1
@@ -595,17 +617,18 @@ def _build_grid_frame(screen, paths, cols, rows, config):
         draw_theme_border(frame)
     except Exception:
         pass
-    return frame
+    return frame, rects
 
 
 def _build_split_frame(screen, paths, config):
-    """Two photos side by side, each filling ~50% of the width."""
+    """Two photos side by side, each filling ~50%. Returns (frame, rects)."""
     w, h = screen.get_size()
     frame = pygame.Surface((w, h))
     frame.fill((0, 0, 0))
     gap = _gutter_px(config, w)
     cell_w = (w - gap) // 2
     cells = [(0, 0, cell_w, h), (cell_w + gap, 0, w - cell_w - gap, h)]
+    rects = []
     for idx, (cx, cy, cw, ch) in enumerate(cells):
         if idx >= len(paths):
             break
@@ -614,7 +637,9 @@ def _build_split_frame(screen, paths, config):
             if img:
                 img = _maybe_effect(img, config, paths[idx])
                 iw, ih = img.get_size()
-                frame.blit(img, (cx + (cw - iw) // 2, cy + (ch - ih) // 2))
+                x, y = cx + (cw - iw) // 2, cy + (ch - ih) // 2
+                frame.blit(img, (x, y))
+                rects.append((paths[idx], pygame.Rect(x, y, iw, ih)))
         except Exception as e:
             log_error(f"Split render failed for {paths[idx]}: {e}")
     try:
@@ -622,7 +647,7 @@ def _build_split_frame(screen, paths, config):
         draw_theme_border(frame)
     except Exception:
         pass
-    return frame
+    return frame, rects
 
 
 def _build_cascade_frame(screen, paths, config):
@@ -639,15 +664,17 @@ def _build_cascade_frame(screen, paths, config):
     border = max(4, w // 220)
 
     imgs = []
+    used_paths = []
     for p in paths[:3]:
         try:
             im = _scaled_image(p, cell_w, cell_h)
             if im:
                 imgs.append(_maybe_effect(im, config, p))
+                used_paths.append(p)
         except Exception as e:
             log_error(f"Cascade render failed for {p}: {e}")
     if not imgs:
-        return frame
+        return frame, []
 
     # Cascade each photo down-right from the previous, overlapping its corner by
     # `ov` of the *actual* photo size, then centre the whole stack.
@@ -675,18 +702,20 @@ def _build_cascade_frame(screen, paths, config):
         total_h = max(ys[k] + imgs[k].get_height() for k in range(len(imgs)))
     offx, offy = (w - total_w) // 2, (h - total_h) // 2
 
+    rects = []
     for k in range(len(imgs)):
         iw, ih = imgs[k].get_size()
         x, y = xs[k] + offx, ys[k] + offy
         pygame.draw.rect(frame, (240, 240, 240),
                          (x - border, y - border, iw + 2 * border, ih + 2 * border))
         frame.blit(imgs[k], (x, y))
+        rects.append((used_paths[k], pygame.Rect(x, y, iw, ih)))
     try:
         from modules.theme_manager import draw_theme_border
         draw_theme_border(frame)
     except Exception:
         pass
-    return frame
+    return frame, rects
 
 
 def _stamp(screen, overlay):
@@ -801,23 +830,25 @@ def show_layout(screen, image_paths, config, mode, file_meta=None, fade=True, ov
         portrait = h > w
 
         if mode == "split":
-            frame = _build_split_frame(screen, image_paths, config)
+            frame, rects = _build_split_frame(screen, image_paths, config)
+            _last_photo_rects[id(screen)] = rects
             _present_split(screen, frame,
                            animate=fade and config.get("layout_fade_enabled", True),
                            overlay=overlay)
             return
         elif mode == "cascade":
-            frame = _build_cascade_frame(screen, image_paths, config)
+            frame, rects = _build_cascade_frame(screen, image_paths, config)
         elif mode == "tile3":
             cols, rows = (1, 3) if portrait else (3, 1)
-            frame = _build_grid_frame(screen, image_paths, cols, rows, config)
+            frame, rects = _build_grid_frame(screen, image_paths, cols, rows, config)
         elif mode == "tile6":
             cols, rows = (2, 3) if portrait else (3, 2)
-            frame = _build_grid_frame(screen, image_paths, cols, rows, config)
+            frame, rects = _build_grid_frame(screen, image_paths, cols, rows, config)
         else:
             date, cap = file_meta or (None, None)
-            frame = _build_single_frame(screen, image_paths[0], config, date, cap)
+            frame, rects = _build_single_frame(screen, image_paths[0], config, date, cap)
 
+        _last_photo_rects[id(screen)] = rects
         _present(screen, frame, fade=fade and config.get("layout_fade_enabled", True),
                  style=_pick_transition(config), overlay=overlay)
     except Exception as e:
