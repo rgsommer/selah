@@ -361,24 +361,22 @@ def _queue_feature_by_orientation(items, screens, portrait_files, landscape_file
 
 
 def _set_all_hdmi(config, screens, on):
-    """Power every photo screen's HDMI on/off together (F9 blackout / restore),
-    each restored at its own layout position. Idempotent via output_power."""
+    """Power every photo screen's HDMI off (F9 blackout) or restore the canonical
+    side-by-side layout (wake). Restore uses --right-of so it can't mirror."""
     try:
-        from modules.screen_power import output_power
+        from modules.screen_power import output_power, restore_side_by_side
     except Exception:
+        return
+    if on:
+        restore_side_by_side(config)      # geometry-independent; heals mirroring
         return
     photo_screens = [(t, s) for t, s in screens.items()
                      if t.startswith("portrait") or t.startswith("landscape")]
     ids = [config.get("screen1_display_id", 2), config.get("screen2_display_id", 7)]
     names = [config.get("screen1_output", "HDMI-1"), config.get("screen2_output", "HDMI-2")]
     for idx, (stype, screen) in enumerate(photo_screens):
-        try:
-            ox, oy = screen.get_offset()
-            pos = f"{ox}x{oy}"
-        except Exception:
-            pos = None
-        output_power(ids[idx] if idx < len(ids) else None, on,
-                     names[idx] if idx < len(names) else None, pos)
+        output_power(ids[idx] if idx < len(ids) else None, False,
+                     names[idx] if idx < len(names) else None)
 
 
 def _maybe_sprinkle(state, config, current_ts):
@@ -883,6 +881,16 @@ def main():
     # runs in the configured zone (e.g. Eastern with auto DST).
     apply_timezone(config)
 
+    # Assert the side-by-side dual layout BEFORE building the window, so a
+    # mirrored/overlapped X state (both HDMIs stuck at 0x0) is healed and the
+    # app spans both monitors instead of duplicating onto both.
+    if config.get("enforce_dual_layout", True):
+        try:
+            from modules.screen_power import restore_side_by_side
+            restore_side_by_side(config)
+        except Exception as e:
+            log_error(f"Dual-layout assert failed: {e}")
+
     # Initialize displays
     screens = init_displays(config)
     if not screens:
@@ -1233,23 +1241,16 @@ def main():
                 continue
 
             # Daytime: make sure both HDMIs are on if night mode turned one off,
-            # each restored at its own layout position (not mirrored at 0x0).
+            # restored side-by-side (--right-of, so it can never mirror at 0x0).
             if config.get("night_off_mode", "none") != "none":
                 try:
-                    from modules.screen_power import output_power
-                    photo_screens = [(t, s) for t, s in screens.items()
-                                     if t.startswith("portrait") or t.startswith("landscape")]
-                    ids = [config.get("screen1_display_id", 2), config.get("screen2_display_id", 7)]
+                    from modules.screen_power import restore_side_by_side, is_off
+                    from modules.screen_power import _out_state
+                    # Only re-assert when something was actually powered off.
                     names = [config.get("screen1_output", "HDMI-1"),
                              config.get("screen2_output", "HDMI-2")]
-                    for idx, (stype, screen) in enumerate(photo_screens):
-                        try:
-                            ox, oy = screen.get_offset()
-                            pos = f"{ox}x{oy}"
-                        except Exception:
-                            pos = None
-                        output_power(ids[idx] if idx < len(ids) else None, True,
-                                     names[idx] if idx < len(names) else None, pos)
+                    if any(_out_state.get(n) is False for n in names):
+                        restore_side_by_side(config)
                 except Exception:
                     pass
 

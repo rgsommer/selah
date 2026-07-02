@@ -68,6 +68,20 @@ def output_power(display_id, on, output_name=None, pos=None):
     print(f"[Selah] HDMI {output_name or display_id} -> {'on' if on else 'off'}")
 
 
+def restore_side_by_side(config=None):
+    """Assert the canonical side-by-side dual layout, healing a mirrored/overlapped
+    state (both outputs stuck at 0x0). Uses --right-of so it needs no width math.
+    Safe/no-op on single-monitor or off-Pi setups (xrandr errors are swallowed)."""
+    config = config or {}
+    s1 = config.get("screen1_output", "HDMI-1")
+    s2 = config.get("screen2_output", "HDMI-2")
+    _run(f"xrandr --output {s1} --auto --pos 0x0 --primary "
+         f"--output {s2} --auto --right-of {s1}")
+    _out_state[s1] = True
+    _out_state[s2] = True
+    print(f"[Selah] Asserted dual layout: {s1} | {s2}")
+
+
 def prevent_sleep():
     """Stop the OS from blanking/sleeping the screens during the slideshow.
 
