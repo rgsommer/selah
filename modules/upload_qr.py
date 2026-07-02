@@ -38,7 +38,7 @@ def _upload_url(config):
     if url:
         return url
     port = config.get("web_control_port", 5000)
-    return f"http://{_local_ip()}:{port}"
+    return f"http://{_local_ip()}:{port}/upload"
 
 
 def _build_qr(url):

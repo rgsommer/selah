@@ -1032,8 +1032,9 @@ def main():
         prevent_sleep()
 
     try:
-        # Start web control server if enabled
-        if config.get("web_control_enabled", False):
+        # Start the web server if web control OR the QR upload page is enabled
+        # (the QR points at this server's /upload page, so it must be running).
+        if config.get("web_control_enabled", False) or config.get("upload_qr_enabled", False):
             start_web_server(config, screens)
 
         # Ensure each contact has their own upload subfolder in the family folder.
