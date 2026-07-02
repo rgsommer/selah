@@ -311,6 +311,50 @@ def _recent_media_items(config, days):
     return items
 
 
+def _queue_feature_by_orientation(items, screens, portrait_files, landscape_files, state):
+    """Route F8's recent photos into per-screen queues, matched by orientation so
+    portraits show on the portrait screen and landscapes on the landscape screen,
+    each photo on exactly one screen (no cross-screen duplicates). Returns the
+    number of photos queued."""
+    from collections import deque
+    photo_types = [t for t in screens if t.startswith(("portrait", "landscape"))]
+    if not photo_types:
+        return 0
+    p_types = [t for t in photo_types if t.startswith("portrait")]
+    l_types = [t for t in photo_types if t.startswith("landscape")]
+    pset, lset = set(portrait_files), set(landscape_files)
+
+    def _is_port(path):
+        if path in pset:
+            return True
+        if path in lset:
+            return False
+        try:
+            from modules.image_loader import is_portrait
+            return is_portrait(path)
+        except Exception:
+            return False
+
+    buckets = {t: [] for t in photo_types}
+    for path, caption in items:                       # newest first
+        if _is_port(path) and p_types:
+            targets = p_types
+        elif (not _is_port(path)) and l_types:
+            targets = l_types
+        else:                                         # no screen of that orientation
+            targets = photo_types
+        t = min(targets, key=lambda x: len(buckets[x]))   # balance same-orient screens
+        buckets[t].append((path, caption))
+
+    fbs = state.setdefault("feature_by_screen", {})
+    total = 0
+    for t, lst in buckets.items():
+        if lst:
+            fbs[t] = deque(lst)
+            total += len(lst)
+    return total
+
+
 def _set_all_hdmi(config, screens, on):
     """Power every photo screen's HDMI on/off together (F9 blackout / restore),
     each restored at its own layout position. Idempotent via output_power."""
@@ -433,6 +477,22 @@ def _render_screen(screen, screen_type, files, state, config, media_log, multi_f
     layouts pull from multi_files (the opposite-orientation pool) so the cells fit:
     a landscape screen's tall tile cells get portraits, and vice versa.
     """
+    # F8 per-screen feature queue: orientation-matched, one screen only. Plays
+    # ahead of everything else; drains then normal programming resumes.
+    fbs = state.get("feature_by_screen")
+    if fbs:
+        dq = fbs.get(screen_type)
+        while dq:
+            path, caption = dq.popleft()
+            if os.path.exists(path) and not path.lower().endswith(VIDEO_EXTS):
+                frame = {"mode": "single", "picks": [path], "caption": caption}
+                _push_history(state, screen_type, frame)
+                _render_frame(screen, frame, config, media_log)
+                _mark_shown(state, [path], config, len(files))
+                return
+        if dq is not None:                 # this screen's queue is now empty
+            fbs.pop(screen_type, None)
+
     # Morning queue (scheduled greetings + on-this-day) plays first, one/frame.
     fbq = state.get("flashback_queue")
     if fbq:
@@ -1037,18 +1097,17 @@ def main():
                             log_error(f"F7 on-this-day failed: {e}")
                     elif event.key == pygame.K_F8:
                         # Feature every new photo from the last few days now, then
-                        # normal programming resumes once the queue drains.
+                        # normal programming resumes once the queue drains. Each
+                        # photo is routed to a screen matching its orientation and
+                        # shown on only ONE screen (no cross-screen duplicates).
                         try:
                             from collections import deque
                             days = int(config.get("feature_new_days", 3) or 3)
                             items = _recent_media_items(config, days)
                             if items:
-                                fq = state.get("flashback_queue")
-                                if not isinstance(fq, deque):
-                                    fq = deque()
-                                    state["flashback_queue"] = fq
-                                for it in reversed(items):   # newest shows first
-                                    fq.appendleft(it)
+                                total = _queue_feature_by_orientation(
+                                    items, screens, portrait_files,
+                                    landscape_files, state)
                                 # Clear any manual pause so the queue plays now.
                                 for _st in screens:
                                     if _st.startswith(("portrait", "landscape")):
@@ -1056,7 +1115,7 @@ def main():
                                 state["paused"] = False
                                 show_toast_if_needed(
                                     screens, config,
-                                    f"Featuring {len(items)} new photo(s) "
+                                    f"Featuring {total} new photo(s) "
                                     f"from the last {days} days")
                             else:
                                 show_toast_if_needed(
