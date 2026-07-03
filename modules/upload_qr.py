@@ -41,13 +41,18 @@ def _upload_url(config):
     return f"http://{_local_ip()}:{port}/upload"
 
 
-def _build_qr(url, target_px=220):
-    qr = qrcode.QRCode(border=2, box_size=1)
+def _build_qr(url, target_px=300):
+    # Low error-correction = fewer modules = BIGGER modules at the same pixel
+    # size, which scans far more reliably off a screen. border=4 is the standard
+    # white quiet zone (needed for the camera to lock on).
+    qr = qrcode.QRCode(
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        border=4, box_size=1)
     qr.add_data(url)
     qr.make(fit=True)
     matrix = qr.get_matrix()
     n = len(matrix)
-    scale = max(3, target_px // max(1, n))
+    scale = max(4, target_px // max(1, n))
     size = n * scale
     surf = pygame.Surface((size, size))
     surf.fill((255, 255, 255))
@@ -102,7 +107,7 @@ def show_upload_qr_now(screens, config, seconds=60):
     url = _upload_url(config)
     print(f"[Selah] Upload QR URL: {url}")   # visible in the console for debugging
     try:
-        big = _build_qr(url, target_px=440)   # large, easy to scan from a distance
+        big = _build_qr(url, target_px=460)   # large, easy to scan from a distance
     except Exception as e:
         log_error(f"QR build failed: {e}")
         return
