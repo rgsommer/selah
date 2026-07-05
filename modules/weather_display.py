@@ -477,10 +477,24 @@ def _draw_boat(s, cx, cy, r, great=False):
         pass
 
 
+def _draw_wind_glyph(s, x, cy, size):
+    """A tiny breeze glyph (two curling lines) with its left edge at x."""
+    try:
+        col = (170, 195, 220)
+        lw = max(1, size // 9)
+        y1, y2 = cy - int(size * 0.16), cy + int(size * 0.16)
+        pygame.draw.line(s, col, (x, y1), (x + int(size * 0.68), y1), lw)
+        pygame.draw.circle(s, col, (x + int(size * 0.68), y1), max(2, int(size * 0.15)), lw)
+        pygame.draw.line(s, col, (x, y2), (x + int(size * 0.5), y2), lw)
+        pygame.draw.circle(s, col, (x + int(size * 0.5), y2), max(2, int(size * 0.12)), lw)
+    except Exception:
+        pass
+
+
 def _render_forecast(screen, forecast, config):
     """Render the 5-day forecast as a centred panel with an icon, hi/lo, chance of
-    rain, and a wrapped condition per day. Pleasant outdoor days get a green tint;
-    good boating days get a boat badge."""
+    rain, wind (km/h), and a wrapped condition per day. Pleasant outdoor days get
+    a green tint; good boating days get a boat badge."""
     try:
         w, h = screen.get_size()
         n = len(forecast)
@@ -488,7 +502,7 @@ def _render_forecast(screen, forecast, config):
             return
         col_w = max(150, min(210, (w - 60) // n))
         panel_w = min(w - 30, n * col_w)
-        panel_h = min(h - 30, max(320, h // 3))
+        panel_h = min(h - 30, max(360, h // 3))
         px, py = (w - panel_w) // 2, (h - panel_h) // 2
         col_w = panel_w // n
 
@@ -552,7 +566,15 @@ def _render_forecast(screen, forecast, config):
                 screen.blit(dtxt, dtxt.get_rect(midleft=(cx - dw // 2 + 2, y)))
                 y += small.get_linesize() + 2
 
-            for ln in _wrap(d.get("desc", ""), small, col_w - 14)[:3]:
+            wind = d.get("wind")
+            if wind is not None:
+                wtxt = small.render(f"{round(wind * 3.6)} km/h", True, (175, 200, 220))
+                ww = wtxt.get_width()
+                _draw_wind_glyph(screen, cx - ww // 2 - 18, y, small.get_height())
+                screen.blit(wtxt, wtxt.get_rect(midleft=(cx - ww // 2, y)))
+                y += small.get_linesize() + 2
+
+            for ln in _wrap(d.get("desc", ""), small, col_w - 14)[:2]:
                 ls = small.render(ln, True, (185, 200, 225))
                 screen.blit(ls, ls.get_rect(center=(cx, y)))
                 y += small.get_linesize()
