@@ -294,16 +294,20 @@ def _fetch_forecast(api_key, location):
             t = entry["main"]["temp"]
             main = entry["weather"][0]["main"]
             desc = entry["weather"][0]["description"].title()
+            wnd = entry.get("wind") or {}
             pop = float(entry.get("pop", 0) or 0)      # 0..1 chance of precipitation
-            wind = float((entry.get("wind") or {}).get("speed", 0) or 0)   # m/s
+            wind = float(wnd.get("speed", 0) or 0)     # m/s
+            deg = wnd.get("deg")                       # direction wind blows FROM
             rec = days.setdefault(key, {"hi": t, "lo": t, "conds": {}, "noon": None,
-                                        "pop": 0.0, "wind": None})
+                                        "pop": 0.0, "wind": None, "wind_deg": None})
             rec["hi"] = max(rec["hi"], t)
             rec["lo"] = min(rec["lo"], t)
             rec["conds"][main] = rec["conds"].get(main, 0) + 1
             if 6 <= dt.hour <= 21:                     # daytime max = the useful "chance of rain" / gustiness
                 rec["pop"] = max(rec["pop"], pop)
-                rec["wind"] = wind if rec["wind"] is None else max(rec["wind"], wind)
+                if rec["wind"] is None or wind > rec["wind"]:
+                    rec["wind"] = wind                 # keep the direction of the strongest wind
+                    rec["wind_deg"] = deg
             if 11 <= dt.hour <= 15:
                 rec["noon"] = desc
         out = []
@@ -316,6 +320,7 @@ def _fetch_forecast(api_key, location):
                 "desc": rec["noon"] or main, "main": main,
                 "pop": round(rec["pop"] * 100),
                 "wind": (round(rec["wind"], 1) if rec["wind"] is not None else None),
+                "wind_deg": rec.get("wind_deg"),
             })
         return out
     except Exception as e:
@@ -477,16 +482,39 @@ def _draw_boat(s, cx, cy, r, great=False):
         pass
 
 
-def _draw_wind_glyph(s, x, cy, size):
-    """A tiny breeze glyph (two curling lines) with its left edge at x."""
+_COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+            "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+
+
+def _compass(deg):
+    """16-point compass label for a bearing (direction wind blows FROM)."""
+    if deg is None:
+        return ""
     try:
-        col = (170, 195, 220)
-        lw = max(1, size // 9)
-        y1, y2 = cy - int(size * 0.16), cy + int(size * 0.16)
-        pygame.draw.line(s, col, (x, y1), (x + int(size * 0.68), y1), lw)
-        pygame.draw.circle(s, col, (x + int(size * 0.68), y1), max(2, int(size * 0.15)), lw)
-        pygame.draw.line(s, col, (x, y2), (x + int(size * 0.5), y2), lw)
-        pygame.draw.circle(s, col, (x + int(size * 0.5), y2), max(2, int(size * 0.12)), lw)
+        return _COMPASS[int((float(deg) % 360) / 22.5 + 0.5) % 16]
+    except Exception:
+        return ""
+
+
+def _draw_wind_arrow(s, cx, cy, size, from_deg):
+    """Small arrow showing where the wind is blowing TO (from_deg is the FROM
+    bearing; N=up, E=right on screen)."""
+    if from_deg is None:
+        return
+    try:
+        to = math.radians((float(from_deg) + 180) % 360)
+        dx, dy = math.sin(to), -math.cos(to)
+        tip = (cx + dx * size, cy + dy * size)
+        tail = (cx - dx * size, cy - dy * size)
+        col = (200, 215, 235)
+        pygame.draw.line(s, col, tail, tip, max(2, size // 4))
+        # arrowhead
+        left = math.radians((float(from_deg) + 180 + 140) % 360)
+        right = math.radians((float(from_deg) + 180 - 140) % 360)
+        for ang in (left, right):
+            hx, hy = math.sin(ang), -math.cos(ang)
+            pygame.draw.line(s, col, tip, (tip[0] + hx * size * 0.7, tip[1] + hy * size * 0.7),
+                             max(2, size // 4))
     except Exception:
         pass
 
@@ -568,9 +596,16 @@ def _render_forecast(screen, forecast, config):
 
             wind = d.get("wind")
             if wind is not None:
-                wtxt = small.render(f"{round(wind * 3.6)} km/h", True, (175, 200, 220))
+                deg = d.get("wind_deg")
+                label = f"{round(wind * 3.6)} km/h"
+                comp = _compass(deg)
+                if comp:
+                    label += f" {comp}"
+                wtxt = small.render(label, True, (175, 200, 220))
                 ww = wtxt.get_width()
-                _draw_wind_glyph(screen, cx - ww // 2 - 18, y, small.get_height())
+                ar = small.get_height() // 2
+                # a small direction arrow to the left, then the text
+                _draw_wind_arrow(screen, cx - ww // 2 - 14, y, ar, deg)
                 screen.blit(wtxt, wtxt.get_rect(midleft=(cx - ww // 2, y)))
                 y += small.get_linesize() + 2
 
