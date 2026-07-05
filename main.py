@@ -911,6 +911,55 @@ def _draw_number_badge(screen, rect, n):
         pass
 
 
+def _prompt_rotate(screen, path):
+    """Live-rotate preview: arrows spin the photo, Enter saves the net rotation
+    (degrees CCW, multiple of 90), Esc cancels. Returns the angle, or None."""
+    try:
+        from modules.display_handler import _load_surface
+        surf = _load_surface(path)
+    except Exception:
+        surf = None
+    if surf is None:
+        return None
+    w, h = screen.get_size()
+    hint_font = pygame.font.Font(None, max(24, w // 44))
+    hint = hint_font.render("← / → rotate      Enter = save      Esc = cancel",
+                            True, (235, 235, 235))
+    angle = 0
+    clock = pygame.time.Clock()
+    pygame.event.clear()
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return None
+            if event.type != pygame.KEYDOWN:
+                continue
+            if event.key == pygame.K_ESCAPE:
+                return None
+            if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                return (angle % 360) or None
+            if event.key in (pygame.K_LEFT, pygame.K_UP):
+                angle += 90
+            elif event.key in (pygame.K_RIGHT, pygame.K_DOWN):
+                angle -= 90
+        screen.fill((0, 0, 0))
+        rot = pygame.transform.rotate(surf, angle)
+        rw, rh = rot.get_size()
+        sc = min((w - 40) / rw, (h - 90) / rh, 1.0)
+        if sc < 1.0:
+            rot = pygame.transform.smoothscale(rot, (max(1, int(rw * sc)), max(1, int(rh * sc))))
+        screen.blit(rot, rot.get_rect(center=(w // 2, (h - 50) // 2)))
+        bar = pygame.Surface((hint.get_width() + 40, hint.get_height() + 18), pygame.SRCALPHA)
+        bar.fill((0, 0, 0, 205))
+        bar.blit(hint, (20, 9))
+        screen.blit(bar, ((w - bar.get_width()) // 2, h - bar.get_height() - 16))
+        try:
+            pygame.display.flip()
+        except Exception:
+            pass
+        clock.tick(30)
+
+
 def _prompt_pick_photo(screens, numbered, verb="Delete"):
     """Overlay a yellow number on each displayed photo and let the user type the
     one to act on. Keeps the photos visible while choosing. Returns the chosen
@@ -1383,6 +1432,38 @@ def main():
                         except Exception as e:
                             log_error(f"F11 QR failed: {e}")
                         state["nav_request"] = 1   # re-render after it closes
+                    elif event.key == pygame.K_F12:
+                        # Fix a mis-rotated photo: pick by number, spin, bake it in.
+                        from modules.display_handler import get_photo_rects
+                        numbered = []
+                        for _st, _sc in screens.items():
+                            if _st.startswith(("portrait", "landscape")):
+                                for _p, _r in get_photo_rects(_sc):
+                                    numbered.append((_st, _sc, _r, _p))
+                        target = screens.get("landscape") or screens.get("portrait")
+                        if not numbered:
+                            show_toast_if_needed(screens, config, "No photo to rotate")
+                        elif target:
+                            choice = _prompt_pick_photo(screens, numbered, verb="Rotate")
+                            if choice is not None:
+                                cur_path = numbered[choice][3]
+                                angle = _prompt_rotate(target, cur_path)
+                                if angle:
+                                    try:
+                                        from modules.photo_rotate import rotate_file
+                                        ok = rotate_file(cur_path, angle)
+                                    except Exception as e:
+                                        log_error(f"F12 rotate failed: {e}")
+                                        ok = False
+                                    if ok:
+                                        media_log = _load_media_log()
+                                        last_media_refresh = 0   # re-classify onto the right screen
+                                        state.setdefault(numbered[choice][0], {})["paused_until"] = \
+                                            current_ts + config.get("manual_navigation_pause", 60)
+                                        show_toast_if_needed(screens, config, "Photo rotated")
+                                    else:
+                                        show_toast_if_needed(screens, config, "Rotate failed")
+                            _redraw_current(screens, state, config, media_log)
                     elif event.key in (pygame.K_h, pygame.K_QUESTION) or event.unicode == "?":
                         from modules.help_overlay import show_help
                         target = screens.get("landscape") or screens.get("portrait")

@@ -23,6 +23,7 @@ _KEYS = [
     ("F9", "Displays off (+1 hr/press, up to 6; nav wakes)"),
     ("F10", "Edit a photo's caption — pick its number"),
     ("F11", "Show the 'scan to add a photo' QR code"),
+    ("F12", "Rotate a mis-oriented photo (pick its number)"),
     ("Del", "Delete a photo — pick its number, then code"),
     ("H  or  ?", "This help"),
     ("Esc", "Quit"),
