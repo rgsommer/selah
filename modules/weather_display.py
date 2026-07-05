@@ -398,9 +398,25 @@ def _draw_weather_icon(s, cx, cy, r, main):
         pass
 
 
+def _is_nice_day(d, config):
+    """True when a day looks pleasant to be outside: comfortable high, low chance
+    of rain, and not stormy/snowy. Thresholds are tunable."""
+    if not config.get("nice_day_hue", True):
+        return False
+    hi = d.get("hi")
+    if hi is None:
+        return False
+    main = (d.get("main") or "").lower()
+    if any(b in main for b in ("rain", "snow", "thunder", "drizzle", "sleet", "storm")):
+        return False
+    if (d.get("pop") or 0) > config.get("nice_day_max_pop", 35):
+        return False
+    return config.get("nice_day_min_c", 16) <= hi <= config.get("nice_day_max_c", 28)
+
+
 def _render_forecast(screen, forecast, config):
     """Render the 5-day forecast as a centred panel with an icon, hi/lo, chance of
-    rain, and a wrapped condition per day."""
+    rain, and a wrapped condition per day. Pleasant outdoor days get a green tint."""
     try:
         w, h = screen.get_size()
         n = len(forecast)
@@ -432,11 +448,17 @@ def _render_forecast(screen, forecast, config):
         for i, d in enumerate(forecast):
             cx = px + i * col_w + col_w // 2
             col_left = px + i * col_w
-            # subtle highlight for today's column
-            if d.get("day") == today:
+            is_today = d.get("day") == today
+            nice = _is_nice_day(d, config)
+            # Column tint: green for a pleasant-outdoors day, blue for today.
+            if nice or is_today:
                 hl = pygame.Surface((col_w - 6, panel_h - (top - py) - 10), pygame.SRCALPHA)
-                hl.fill((90, 150, 220, 45))
+                hl.fill((70, 180, 95, 70) if nice else (90, 150, 220, 45))
                 screen.blit(hl, (col_left + 3, top - 6))
+                if is_today and nice:   # both — mark today with a thin border too
+                    pygame.draw.rect(screen, (150, 200, 255, 220),
+                                     (col_left + 3, top - 6, col_w - 6,
+                                      panel_h - (top - py) - 10), width=2, border_radius=8)
 
             y = top
             day_s = day_font.render(d["day"], True, (255, 255, 255))

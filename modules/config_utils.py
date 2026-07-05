@@ -136,6 +136,10 @@ DEFAULT_CONFIG = {
     "overlay_band_persist": True,
     "overlay_fade_in_enabled": True,
     "overlay_fade_seconds": 2.5,
+    "nice_day_hue": True,            # green-tint a forecast day that's pleasant to be outside
+    "nice_day_min_c": 16,
+    "nice_day_max_c": 28,
+    "nice_day_max_pop": 35,
     "weather_pill_enabled": True,
     "weather_pill_position": "top-right",
     "location": "Hamilton,CA",
