@@ -66,12 +66,37 @@ def _load_media_log():
         return []
 
 
-def _get_media_metadata(file_path, media_log):
-    """Look up date and caption for a file from the media log."""
+def _submitter_label(sender):
+    """A friendly first name for the submitter, or '' to skip (owner/visitor/local
+    photos have no useful sender to show)."""
+    from email.utils import parseaddr
+    name, addr = parseaddr(sender or "")
+    label = (name or "").strip().strip('"')
+    if not label and addr:
+        label = re.split(r"[._@]", addr)[0]
+    label = label.strip()
+    if not label:
+        return ""
+    first = label.split()[0]
+    if first.lower() in ("visitor", "unknown", "mailer-daemon", "postmaster"):
+        return ""
+    return first[:1].upper() + first[1:]
+
+
+def _get_media_metadata(file_path, media_log, config=None):
+    """Look up date and caption for a file from the media log. When the photo was
+    submitted by someone, append '— from <Name>' to the caption so viewers can
+    see who shared it (toggle: show_submitter)."""
     entry = next((e for e in media_log if e.get("file_path") == file_path), None)
-    if entry:
-        return entry.get("date"), entry.get("caption")
-    return None, None
+    if not entry:
+        return None, None
+    date = entry.get("date")
+    caption = entry.get("caption") or ""
+    if config is None or config.get("show_submitter", True):
+        who = _submitter_label(entry.get("sender"))
+        if who and f"from {who}".lower() not in caption.lower():
+            caption = (f"{caption} — from {who}" if caption.strip() else f"from {who}")
+    return date, (caption or None)
 
 
 VIDEO_EXTS = ('.mp4', '.avi', '.mov')
@@ -478,7 +503,7 @@ def _render_frame(screen, frame, config, media_log):
         if mode == "single":
             f = picks[0]
             if f.lower().endswith(VIDEO_EXTS):
-                fd, cap = _get_media_metadata(f, media_log)
+                fd, cap = _get_media_metadata(f, media_log, config)
                 show_video(screen, f, config, fd, cap)
                 try:
                     from modules.display_handler import set_photo_rects
@@ -487,7 +512,7 @@ def _render_frame(screen, frame, config, media_log):
                     pass
             else:
                 fd, cap = ((None, cap_override) if cap_override is not None
-                           else _get_media_metadata(f, media_log))
+                           else _get_media_metadata(f, media_log, config))
                 show_layout(screen, [f], config, "single", file_meta=(fd, cap), overlay=band)
             _set_now_showing(f)
         else:
@@ -540,9 +565,10 @@ def _render_screen(screen, screen_type, files, state, config, media_log, multi_f
     if fbs:
         dq = fbs.get(screen_type)
         while dq:
-            path, caption = dq.popleft()
+            path, _caption = dq.popleft()
             if os.path.exists(path) and not path.lower().endswith(VIDEO_EXTS):
-                frame = {"mode": "single", "picks": [path], "caption": caption}
+                # caption=None -> resolve caption + '— from <Name>' from the log.
+                frame = {"mode": "single", "picks": [path], "caption": None}
                 _push_history(state, screen_type, frame)
                 _render_frame(screen, frame, config, media_log)
                 _mark_shown(state, [path], config, len(files))
@@ -1599,6 +1625,7 @@ def main():
                     if _st.startswith(("portrait", "landscape")):
                         state.setdefault(_st, {})["paused_until"] = 0
                 state["paused"] = False
+                media_log = _load_media_log()     # so the new photo's caption + submitter show now
                 last_media_refresh = 0            # also fold into normal rotation promptly
 
             # ---- VOICE CONTROL ----

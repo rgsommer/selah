@@ -153,6 +153,7 @@ DEFAULT_CONFIG = {
     "show_file_name": True,
     "show_file_date": True,
     "show_caption": True,
+    "show_submitter": True,          # append '— from <Name>' to a submitted photo's caption
     "error_email_recipient": "",
     # --- Daily weather card ---
     "weather_time": "08:00",
