@@ -3,6 +3,7 @@
 import datetime
 import json
 import time
+import math
 import pygame
 from modules.logger import log_error
 
@@ -293,10 +294,13 @@ def _fetch_forecast(api_key, location):
             t = entry["main"]["temp"]
             main = entry["weather"][0]["main"]
             desc = entry["weather"][0]["description"].title()
-            rec = days.setdefault(key, {"hi": t, "lo": t, "conds": {}, "noon": None})
+            pop = float(entry.get("pop", 0) or 0)      # 0..1 chance of precipitation
+            rec = days.setdefault(key, {"hi": t, "lo": t, "conds": {}, "noon": None, "pop": 0.0})
             rec["hi"] = max(rec["hi"], t)
             rec["lo"] = min(rec["lo"], t)
             rec["conds"][main] = rec["conds"].get(main, 0) + 1
+            if 6 <= dt.hour <= 21:                     # daytime max is the useful "chance of rain"
+                rec["pop"] = max(rec["pop"], pop)
             if 11 <= dt.hour <= 15:
                 rec["noon"] = desc
         out = []
@@ -307,6 +311,7 @@ def _fetch_forecast(api_key, location):
                 "day": datetime.date.fromisoformat(key).strftime("%a"),
                 "hi": round(rec["hi"]), "lo": round(rec["lo"]),
                 "desc": rec["noon"] or main, "main": main,
+                "pop": round(rec["pop"] * 100),
             })
         return out
     except Exception as e:
@@ -314,49 +319,158 @@ def _fetch_forecast(api_key, location):
         return None
 
 
+def _wrap(text, font, max_w):
+    """Word-wrap `text` to fit `max_w` px; returns a list of lines."""
+    words = str(text or "").split()
+    lines, cur = [], ""
+    for wd in words:
+        t = (cur + " " + wd).strip()
+        if not cur or font.size(t)[0] <= max_w:
+            cur = t
+        else:
+            lines.append(cur)
+            cur = wd
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _draw_weather_icon(s, cx, cy, r, main):
+    """Draw a small flat weather glyph centred at (cx, cy) sized by radius r."""
+    try:
+        m = (main or "").lower()
+        SUN = (250, 200, 70)
+        CLOUD = (228, 233, 240)
+        CLOUD_DK = (150, 160, 176)
+        DROP = (95, 155, 240)
+        BOLT = (255, 214, 70)
+
+        def sun(ox=0, oy=0, rr=None):
+            rr = rr or int(r * 0.55)
+            for a in range(0, 360, 45):
+                ax, ay = math.cos(math.radians(a)), math.sin(math.radians(a))
+                pygame.draw.line(s, SUN,
+                                 (cx + ox + ax * rr * 1.25, cy + oy + ay * rr * 1.25),
+                                 (cx + ox + ax * rr * 1.7, cy + oy + ay * rr * 1.7),
+                                 max(2, r // 12))
+            pygame.draw.circle(s, SUN, (cx + ox, cy + oy), rr)
+
+        def cloud(ox=0, oy=0, col=CLOUD, sc=1.0):
+            rr = int(r * 0.42 * sc)
+            by = cy + oy + int(r * 0.18)
+            pygame.draw.circle(s, col, (cx + ox - rr, by), int(rr * 0.85))
+            pygame.draw.circle(s, col, (cx + ox + int(rr * 0.2), by - int(rr * 0.6)), rr)
+            pygame.draw.circle(s, col, (cx + ox + rr, by), int(rr * 0.8))
+            pygame.draw.rect(s, col, (cx + ox - int(rr * 1.7), by, int(rr * 3.2),
+                             int(rr * 0.95)), border_radius=int(rr * 0.5))
+
+        def drops(col=DROP, n=3):
+            by = cy + int(r * 0.7)
+            for k in range(n):
+                dx = cx + int((k - (n - 1) / 2) * r * 0.45)
+                pygame.draw.line(s, col, (dx, by), (dx - int(r * 0.12), by + int(r * 0.35)),
+                                 max(2, r // 10))
+
+        if "clear" in m:
+            sun()
+        elif "thunder" in m:
+            cloud(oy=-int(r * 0.1), col=CLOUD_DK)
+            pts = [(cx - r * 0.1, cy + r * 0.35), (cx + r * 0.15, cy + r * 0.35),
+                   (cx - r * 0.02, cy + r * 0.7), (cx + r * 0.28, cy + r * 0.3),
+                   (cx + r * 0.05, cy + r * 0.3), (cx + r * 0.2, cy + r * 0.05)]
+            pygame.draw.polygon(s, BOLT, pts)
+        elif "rain" in m or "drizzle" in m:
+            cloud(oy=-int(r * 0.12))
+            drops()
+        elif "snow" in m:
+            cloud(oy=-int(r * 0.12))
+            for k in range(3):
+                dx = cx + int((k - 1) * r * 0.45)
+                pygame.draw.circle(s, (235, 240, 250), (dx, cy + int(r * 0.75)), max(2, r // 9))
+        elif any(x in m for x in ("mist", "fog", "haze", "smoke")):
+            for k in range(3):
+                yy = cy - int(r * 0.3) + k * int(r * 0.35)
+                pygame.draw.line(s, CLOUD_DK, (cx - r, yy), (cx + r, yy), max(2, r // 9))
+        else:  # clouds / default — a little sun peeking behind
+            sun(ox=int(r * 0.35), oy=-int(r * 0.35), rr=int(r * 0.4))
+            cloud()
+    except Exception:
+        pass
+
+
 def _render_forecast(screen, forecast, config):
-    """Render the 5-day forecast as a centered panel."""
+    """Render the 5-day forecast as a centred panel with an icon, hi/lo, chance of
+    rain, and a wrapped condition per day."""
     try:
         w, h = screen.get_size()
         n = len(forecast)
         if not n:
             return
-        panel_w = min(w - 40, max(480, n * 150))
-        panel_h = max(170, h // 4)
+        col_w = max(150, min(210, (w - 60) // n))
+        panel_w = min(w - 30, n * col_w)
+        panel_h = min(h - 30, max(320, h // 3))
         px, py = (w - panel_w) // 2, (h - panel_h) // 2
+        col_w = panel_w // n
 
         bg = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
-        bg.fill((8, 16, 40, 205))
+        pygame.draw.rect(bg, (10, 18, 42, 214), bg.get_rect(), border_radius=16)
+        pygame.draw.rect(bg, (60, 110, 180, 230), bg.get_rect(), width=2, border_radius=16)
         screen.blit(bg, (px, py))
 
-        title_font = pygame.font.Font(None, max(28, w // 32))
-        day_font = pygame.font.Font(None, max(24, w // 44))
-        small = pygame.font.Font(None, max(20, w // 56))
-        screen.blit(title_font.render("5-Day Forecast", True, (120, 200, 255)),
-                    (px + 16, py + 12))
+        title_font = pygame.font.Font(None, max(30, w // 30))
+        day_font = pygame.font.Font(None, max(26, w // 40))
+        temp_font = pygame.font.Font(None, max(24, w // 46))
+        small = pygame.font.Font(None, max(20, w // 54))
 
-        col_w = panel_w // n
-        top = py + 18 + title_font.get_linesize()
-        line = small.get_linesize() + 4
+        t_s = title_font.render("5-Day Forecast", True, (130, 205, 255))
+        screen.blit(t_s, (px + 18, py + 14))
+
+        today = datetime.datetime.now().strftime("%a")
+        top = py + 20 + title_font.get_linesize()
+        icon_r = max(16, col_w // 6)
+
         for i, d in enumerate(forecast):
             cx = px + i * col_w + col_w // 2
+            col_left = px + i * col_w
+            # subtle highlight for today's column
+            if d.get("day") == today:
+                hl = pygame.Surface((col_w - 6, panel_h - (top - py) - 10), pygame.SRCALPHA)
+                hl.fill((90, 150, 220, 45))
+                screen.blit(hl, (col_left + 3, top - 6))
+
+            y = top
             day_s = day_font.render(d["day"], True, (255, 255, 255))
-            screen.blit(day_s, day_s.get_rect(center=(cx, top)))
-            hilo = small.render(f"{d['hi']}° / {d['lo']}°", True, (225, 225, 225))
-            screen.blit(hilo, hilo.get_rect(center=(cx, top + day_font.get_linesize() + 6)))
-            cond = small.render(_short(d.get("desc", "")), True, (180, 195, 220))
-            screen.blit(cond, cond.get_rect(center=(cx, top + day_font.get_linesize() + 6 + line)))
+            screen.blit(day_s, day_s.get_rect(center=(cx, y)))
+            y += day_font.get_linesize() // 2 + icon_r + 8
+
+            _draw_weather_icon(screen, cx, y, icon_r, d.get("main"))
+            y += icon_r + temp_font.get_linesize() // 2 + 6
+
+            hilo = temp_font.render(f"{d['hi']}° / {d['lo']}°", True, (235, 235, 235))
+            screen.blit(hilo, hilo.get_rect(center=(cx, y)))
+            y += temp_font.get_linesize() + 2
+
+            pop = d.get("pop")
+            if pop:
+                # a tiny drop + percentage
+                dtxt = small.render(f"{pop}%", True, (150, 195, 245))
+                dw = dtxt.get_width()
+                drop_x = cx - dw // 2 - 8
+                pygame.draw.circle(screen, (95, 155, 240), (drop_x, y), max(3, small.get_height() // 4))
+                screen.blit(dtxt, dtxt.get_rect(midleft=(cx - dw // 2 + 2, y)))
+                y += small.get_linesize() + 2
+
+            for ln in _wrap(d.get("desc", ""), small, col_w - 14)[:3]:
+                ls = small.render(ln, True, (185, 200, 225))
+                screen.blit(ls, ls.get_rect(center=(cx, y)))
+                y += small.get_linesize()
+
         try:
             pygame.display.flip()
         except Exception:
             pass
     except Exception as e:
         log_error(f"Forecast render failed: {e}")
-
-
-def _short(text, n=14):
-    text = str(text)
-    return text if len(text) <= n else text[:n - 1] + "…"
 
 
 # --- Persistent corner pill (current conditions) ---------------------------
