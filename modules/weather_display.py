@@ -295,12 +295,15 @@ def _fetch_forecast(api_key, location):
             main = entry["weather"][0]["main"]
             desc = entry["weather"][0]["description"].title()
             pop = float(entry.get("pop", 0) or 0)      # 0..1 chance of precipitation
-            rec = days.setdefault(key, {"hi": t, "lo": t, "conds": {}, "noon": None, "pop": 0.0})
+            wind = float((entry.get("wind") or {}).get("speed", 0) or 0)   # m/s
+            rec = days.setdefault(key, {"hi": t, "lo": t, "conds": {}, "noon": None,
+                                        "pop": 0.0, "wind": None})
             rec["hi"] = max(rec["hi"], t)
             rec["lo"] = min(rec["lo"], t)
             rec["conds"][main] = rec["conds"].get(main, 0) + 1
-            if 6 <= dt.hour <= 21:                     # daytime max is the useful "chance of rain"
+            if 6 <= dt.hour <= 21:                     # daytime max = the useful "chance of rain" / gustiness
                 rec["pop"] = max(rec["pop"], pop)
+                rec["wind"] = wind if rec["wind"] is None else max(rec["wind"], wind)
             if 11 <= dt.hour <= 15:
                 rec["noon"] = desc
         out = []
@@ -312,6 +315,7 @@ def _fetch_forecast(api_key, location):
                 "hi": round(rec["hi"]), "lo": round(rec["lo"]),
                 "desc": rec["noon"] or main, "main": main,
                 "pop": round(rec["pop"] * 100),
+                "wind": (round(rec["wind"], 1) if rec["wind"] is not None else None),
             })
         return out
     except Exception as e:
@@ -414,9 +418,69 @@ def _is_nice_day(d, config):
     return config.get("nice_day_min_c", 16) <= hi <= config.get("nice_day_max_c", 28)
 
 
+def _boating_level(d, config):
+    """0 = not boating weather, 1 = good (🚤), 2 = really good (🛳️). Driven mainly
+    by daytime wind, plus warmth, low rain, and no storms. Needs wind data."""
+    if not config.get("boating_hint", True):
+        return 0
+    hi = d.get("hi")
+    wind = d.get("wind")
+    if hi is None or wind is None:
+        return 0
+    main = (d.get("main") or "").lower()
+    if any(b in main for b in ("rain", "snow", "thunder", "drizzle", "sleet", "storm")):
+        return 0
+    pop = d.get("pop") or 0
+    if (hi >= config.get("boat_great_min_c", 22)
+            and pop <= config.get("boat_great_max_pop", 15)
+            and wind <= config.get("boat_great_max_wind_ms", 5)):
+        return 2
+    if (hi >= config.get("boat_good_min_c", 18)
+            and pop <= config.get("boat_good_max_pop", 30)
+            and wind <= config.get("boat_good_max_wind_ms", 8)):
+        return 1
+    return 0
+
+
+def _draw_boat(s, cx, cy, r, great=False):
+    """Draw a small speedboat (great=False) or passenger ship (great=True)."""
+    try:
+        water = (120, 180, 235)
+        white = (242, 244, 248)
+        if great:
+            hull = (58, 68, 88)
+            pygame.draw.polygon(s, hull, [(cx - r, cy), (cx + r, cy),
+                                          (cx + r * 0.7, cy + r * 0.55),
+                                          (cx - r * 0.7, cy + r * 0.55)])
+            pygame.draw.rect(s, white, (cx - r * 0.7, cy - r * 0.55, r * 1.4, r * 0.55),
+                             border_radius=2)
+            pygame.draw.rect(s, white, (cx - r * 0.42, cy - r * 0.95, r * 0.84, r * 0.42),
+                             border_radius=2)
+            for k in range(4):
+                pygame.draw.circle(s, (120, 170, 220),
+                                   (int(cx - r * 0.5 + k * r * 0.33), int(cy - r * 0.28)),
+                                   max(1, int(r * 0.07)))
+            pygame.draw.rect(s, (70, 80, 95), (cx + r * 0.02, cy - r * 1.25, r * 0.26, r * 0.4))
+            pygame.draw.rect(s, (205, 90, 70), (cx + r * 0.02, cy - r * 1.25, r * 0.26, r * 0.13))
+        else:
+            hull = (208, 62, 55)
+            pygame.draw.polygon(s, hull, [(cx - r, cy), (cx + r * 0.95, cy),
+                                          (cx + r * 0.55, cy + r * 0.5),
+                                          (cx - r * 0.6, cy + r * 0.5)])
+            pygame.draw.line(s, white, (cx - r * 0.9, cy), (cx + r * 0.85, cy),
+                             max(1, int(r * 0.16)))
+            pygame.draw.polygon(s, (150, 195, 235),
+                                [(cx - r * 0.1, cy), (cx + r * 0.35, cy), (cx + r * 0.15, cy - r * 0.42)])
+        pygame.draw.line(s, water, (cx - r, cy + r * 0.62), (cx + r, cy + r * 0.62),
+                         max(2, int(r * 0.16)))
+    except Exception:
+        pass
+
+
 def _render_forecast(screen, forecast, config):
     """Render the 5-day forecast as a centred panel with an icon, hi/lo, chance of
-    rain, and a wrapped condition per day. Pleasant outdoor days get a green tint."""
+    rain, and a wrapped condition per day. Pleasant outdoor days get a green tint;
+    good boating days get a boat badge."""
     try:
         w, h = screen.get_size()
         n = len(forecast)
@@ -459,6 +523,12 @@ def _render_forecast(screen, forecast, config):
                     pygame.draw.rect(screen, (150, 200, 255, 220),
                                      (col_left + 3, top - 6, col_w - 6,
                                       panel_h - (top - py) - 10), width=2, border_radius=8)
+
+            # boating badge in the column's top-right corner
+            lvl = _boating_level(d, config)
+            if lvl:
+                br = max(11, col_w // 11)
+                _draw_boat(screen, col_left + col_w - br - 8, top + br + 2, br, great=(lvl == 2))
 
             y = top
             day_s = day_font.render(d["day"], True, (255, 255, 255))

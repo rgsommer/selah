@@ -140,6 +140,13 @@ DEFAULT_CONFIG = {
     "nice_day_min_c": 16,
     "nice_day_max_c": 28,
     "nice_day_max_pop": 35,
+    "boating_hint": True,            # boat badge on good boating days (needs wind data)
+    "boat_good_min_c": 18,
+    "boat_good_max_wind_ms": 8,      # ~15 kt
+    "boat_good_max_pop": 30,
+    "boat_great_min_c": 22,
+    "boat_great_max_wind_ms": 5,     # ~10 kt (calm)
+    "boat_great_max_pop": 15,
     "weather_pill_enabled": True,
     "weather_pill_position": "top-right",
     "location": "Hamilton,CA",
