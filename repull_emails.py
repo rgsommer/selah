@@ -108,7 +108,7 @@ def main():
         # with thumbnails of that email's photos.
         if photo_paths and do_reply:
             try:
-                send_auto_reply(sender, cfg, sdate, photo_paths)
+                send_auto_reply(sender, cfg, sdate, photo_paths, caption)
                 replies += 1
                 print(f"  replied to: {sender} ({len(photo_paths)} photo(s))")
             except Exception as e:

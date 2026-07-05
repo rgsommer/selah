@@ -522,6 +522,27 @@ def _render_frame(screen, frame, config, media_log):
         log_error(f"Render frame failed: {e}")
 
 
+def _redraw_current(screens, state, config, media_log):
+    """Re-render each photo screen's current frame (from history) with the current
+    media_log, then re-draw overlays. Clears transient number badges and reflects
+    a just-edited caption immediately, without advancing the rotation."""
+    for t, s in screens.items():
+        if not t.startswith(("portrait", "landscape")):
+            continue
+        sd = state.get(t) or {}
+        hist = sd.get("history", [])
+        pos = sd.get("hist_pos", len(hist) - 1)
+        if 0 <= pos < len(hist):
+            try:
+                _render_frame(s, hist[pos], config, media_log)
+            except Exception:
+                pass
+    try:
+        _draw_overlays(screens, config, fade=False)
+    except Exception:
+        pass
+
+
 def _push_history(state, screen_type, frame):
     """Record a rendered frame so the arrows can browse back/forward through it."""
     sd = state.setdefault(screen_type, {"index": 0, "paused_until": 0})
@@ -1336,7 +1357,6 @@ def main():
                             show_toast_if_needed(screens, config, "No photo to edit")
                         elif target:
                             choice = _prompt_pick_photo(screens, numbered, verb="Edit caption for")
-                            state["nav_request"] = 1   # clear badges either way
                             if choice is not None:
                                 cur_path = numbered[choice][3]
                                 from modules.caption_edit import get_caption, update_caption
@@ -1346,9 +1366,15 @@ def main():
                                 if new_cap is not None and new_cap != old_cap:
                                     n = update_caption(cur_path, new_cap)
                                     media_log = _load_media_log()   # reflect it now
+                                    # keep the edited photo up so the change is visible
+                                    state.setdefault(numbered[choice][0], {})["paused_until"] = \
+                                        current_ts + config.get("manual_navigation_pause", 60)
                                     show_toast_if_needed(
                                         screens, config,
                                         "Caption updated" if n else "Couldn't save caption")
+                            # Re-render current frames: clears the number badges and
+                            # shows the new caption in place (no advancing).
+                            _redraw_current(screens, state, config, media_log)
                     elif event.key == pygame.K_F11:
                         # Show the phone-upload QR on demand (big, centred).
                         try:

@@ -155,7 +155,7 @@ def check_for_new_emails(config, screens):
                 # Acknowledge EVERY email that contained a photo — even ones we
                 # already had on disk — so a submitter always hears back.
                 if had_media:
-                    send_auto_reply(sender, config, final_date, reply_photos)
+                    send_auto_reply(sender, config, final_date, reply_photos, caption)
 
             mail.logout()
             break
@@ -579,9 +579,9 @@ def _submit_guidance(config):
     return plain, html
 
 
-def send_auto_reply(sender, config, date, photos=None):
+def send_auto_reply(sender, config, date, photos=None, caption=None):
     """Send a formatted confirmation, plural-aware, with thumbnails of the
-    submitted photos inline."""
+    submitted photos inline (the caption shown under each)."""
     if not config.get("email_address") or not config.get("email_password"):
         return
     photos = photos or []
@@ -608,12 +608,19 @@ def send_auto_reply(sender, config, date, photos=None):
 
         thumb_html = ""
         if thumbs:
-            imgs = "".join(
+            import html as _html
+            cap = _html.escape((caption or "").strip())
+            cap_html = (f'<div style="font-size:12.5px;color:#777;margin-top:6px;'
+                        f'max-width:150px">{cap}</div>' if cap else "")
+            cells = "".join(
+                '<div style="display:inline-block;text-align:center;margin:5px;'
+                'vertical-align:top">'
                 f'<img src="cid:thumb{i}" width="150" '
-                'style="border-radius:10px;margin:5px;border:4px solid #fff;'
-                'box-shadow:0 2px 6px rgba(0,0,0,.25);vertical-align:top">'
+                'style="border-radius:10px;border:4px solid #fff;'
+                'box-shadow:0 2px 6px rgba(0,0,0,.25)">'
+                f'{cap_html}</div>'
                 for i in range(len(thumbs)))
-            thumb_html = f'<div style="margin:18px 0;text-align:center">{imgs}</div>'
+            thumb_html = f'<div style="margin:18px 0;text-align:center">{cells}</div>'
 
         html = f"""\
 <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
