@@ -621,13 +621,22 @@ def _build_grid_frame(screen, paths, cols, rows, config):
 
 
 def _build_split_frame(screen, paths, config):
-    """Two photos side by side, each filling ~50%. Returns (frame, rects)."""
+    """Two photos, each ~50%. Side by side on a landscape screen; on a portrait
+    screen, stacked one above the other with the lower one shifted sideways by
+    split_portrait_offset (default 20%) for a staggered look. Returns (frame, rects)."""
     w, h = screen.get_size()
     frame = pygame.Surface((w, h))
     frame.fill((0, 0, 0))
     gap = _gutter_px(config, w)
-    cell_w = (w - gap) // 2
-    cells = [(0, 0, cell_w, h), (cell_w + gap, 0, w - cell_w - gap, h)]
+    if h > w:
+        # Portrait screen: top/bottom stack, lower photo offset to the right.
+        off = int(w * float(config.get("split_portrait_offset", 0.2)))
+        cw = w - off
+        cell_h = (h - gap) // 2
+        cells = [(0, 0, cw, cell_h), (off, cell_h + gap, cw, h - cell_h - gap)]
+    else:
+        cell_w = (w - gap) // 2
+        cells = [(0, 0, cell_w, h), (cell_w + gap, 0, w - cell_w - gap, h)]
     rects = []
     for idx, (cx, cy, cw, ch) in enumerate(cells):
         if idx >= len(paths):

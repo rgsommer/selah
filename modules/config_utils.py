@@ -25,6 +25,7 @@ DEFAULT_CONFIG = {
     "multi_gutter_px": 0,
     "cascade_size": 0.5,
     "cascade_overlap": 0.10,
+    "split_portrait_offset": 0.2,    # 2-photo split on a portrait screen: sideways offset of the lower photo
     "videos_enabled": True,
     "video_muted": True,
     "video_max_seconds": 60,
