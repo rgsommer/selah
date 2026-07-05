@@ -622,35 +622,65 @@ def _build_grid_frame(screen, paths, cols, rows, config):
 
 def _build_split_frame(screen, paths, config):
     """Two photos, each ~50%. Side by side on a landscape screen; on a portrait
-    screen, stacked one above the other with the lower one shifted sideways by
-    split_portrait_offset (default 20%) for a staggered look. Returns (frame, rects)."""
+    screen, stacked one above the other, the two photos separated by only
+    ~split_portrait_gap of their height and the lower one shifted sideways by
+    split_portrait_offset (default 20%). Returns (frame, rects)."""
     w, h = screen.get_size()
     frame = pygame.Surface((w, h))
     frame.fill((0, 0, 0))
     gap = _gutter_px(config, w)
-    if h > w:
-        # Portrait screen: top/bottom stack, lower photo offset to the right.
+    rects = []
+
+    if h > w and len(paths) >= 2:
         off = int(w * float(config.get("split_portrait_offset", 0.2)))
         cw = w - off
-        cell_h = (h - gap) // 2
-        cells = [(0, 0, cw, cell_h), (off, cell_h + gap, cw, h - cell_h - gap)]
+        per_h = int(h * 0.44)                       # each photo up to ~44% of height
+        imgs = []
+        for p in paths[:2]:
+            try:
+                im = _scaled_image(p, cw, per_h)
+                if im:
+                    im = _maybe_effect(im, config, p)
+            except Exception as e:
+                log_error(f"Split render failed for {p}: {e}")
+                im = None
+            imgs.append(im)
+        if imgs[0] and imgs[1]:
+            h1, h2 = imgs[0].get_height(), imgs[1].get_height()
+            frac = float(config.get("split_portrait_gap", 0.10))
+            sep = int(frac * (h1 + h2) / 2)         # gap = ~10% of photo height
+            total = h1 + sep + h2
+            offy = max(gap, (h - total) // 2)
+            pos = [((cw - imgs[0].get_width()) // 2, offy),
+                   (off + (cw - imgs[1].get_width()) // 2, offy + h1 + sep)]
+            for idx, im in enumerate(imgs):
+                x, y = pos[idx]
+                frame.blit(im, (x, y))
+                rects.append((paths[idx], pygame.Rect(x, y, im.get_width(), im.get_height())))
+        else:  # a photo failed to load — center whichever we have
+            im = imgs[0] or imgs[1]
+            p = paths[0] if imgs[0] else paths[1]
+            if im:
+                x, y = (w - im.get_width()) // 2, (h - im.get_height()) // 2
+                frame.blit(im, (x, y))
+                rects.append((p, pygame.Rect(x, y, im.get_width(), im.get_height())))
     else:
         cell_w = (w - gap) // 2
         cells = [(0, 0, cell_w, h), (cell_w + gap, 0, w - cell_w - gap, h)]
-    rects = []
-    for idx, (cx, cy, cw, ch) in enumerate(cells):
-        if idx >= len(paths):
-            break
-        try:
-            img = _scaled_image(paths[idx], cw, ch)
-            if img:
-                img = _maybe_effect(img, config, paths[idx])
-                iw, ih = img.get_size()
-                x, y = cx + (cw - iw) // 2, cy + (ch - ih) // 2
-                frame.blit(img, (x, y))
-                rects.append((paths[idx], pygame.Rect(x, y, iw, ih)))
-        except Exception as e:
-            log_error(f"Split render failed for {paths[idx]}: {e}")
+        for idx, (cx, cy, cwid, ch) in enumerate(cells):
+            if idx >= len(paths):
+                break
+            try:
+                img = _scaled_image(paths[idx], cwid, ch)
+                if img:
+                    img = _maybe_effect(img, config, paths[idx])
+                    iw, ih = img.get_size()
+                    x, y = cx + (cwid - iw) // 2, cy + (ch - ih) // 2
+                    frame.blit(img, (x, y))
+                    rects.append((paths[idx], pygame.Rect(x, y, iw, ih)))
+            except Exception as e:
+                log_error(f"Split render failed for {paths[idx]}: {e}")
+
     try:
         from modules.theme_manager import draw_theme_border
         draw_theme_border(frame)

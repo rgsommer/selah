@@ -26,6 +26,7 @@ DEFAULT_CONFIG = {
     "cascade_size": 0.5,
     "cascade_overlap": 0.10,
     "split_portrait_offset": 0.2,    # 2-photo split on a portrait screen: sideways offset of the lower photo
+    "split_portrait_gap": 0.10,      # vertical gap between the two, as a fraction of photo height
     "videos_enabled": True,
     "video_muted": True,
     "video_max_seconds": 60,
