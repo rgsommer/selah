@@ -1010,20 +1010,35 @@ def _prompt_pick_photo(screens, numbered, verb="Delete"):
         clock.tick(30)
 
 
+_INTERRUPT_EVENTS = (pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN,
+                     pygame.FINGERDOWN, pygame.FINGERMOTION)
+
+
 def _responsive_sleep(seconds):
-    """Sleep up to `seconds`, but return the instant an input event is queued so
-    arrows / spacebar / F-keys / touch act immediately instead of waiting out
-    the rest of the current rotation."""
-    interrupt = (pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN)
+    """Sleep up to `seconds`, but return the instant an input event arrives so
+    arrows / spacebar / F-keys / touch / swipe act immediately instead of waiting
+    out the rest of the current rotation.
+
+    Uses event.get(filter) (reliable across SDL builds) rather than peek() — peek
+    after pump() can miss freshly-arrived keys, which made F-keys feel like they
+    waited for the next rotation. Matching events are pulled and re-posted so the
+    top of the loop still handles them; other events stay queued untouched.
+    """
     end = time.time() + max(0.0, seconds)
     while time.time() < end:
         try:
-            pygame.event.pump()           # peek alone doesn't poll the OS queue
-            if pygame.event.peek(interrupt):
-                return  # leave it queued; the top of the loop handles it
+            pygame.event.pump()
+            hits = pygame.event.get(_INTERRUPT_EVENTS)
+            if hits:
+                for e in hits:
+                    try:
+                        pygame.event.post(e)   # requeue for the top-of-loop handler
+                    except Exception:
+                        pass
+                return
         except Exception:
             pass
-        pygame.time.delay(40)
+        pygame.time.delay(15)
 
 
 def _render_screen_with_panel(screen_type, screen, portrait_files, landscape_files,
