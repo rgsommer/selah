@@ -150,6 +150,7 @@ DEFAULT_CONFIG = {
     "weather_pill_enabled": True,
     "weather_pill_position": "top-right",
     "location": "Hamilton,CA",
+    "forecast_second_location": "",  # optional 2nd place shown as a strip on the 5-day panel
     "voice_control_enabled": False,
     "web_control_enabled": False,
     "web_control_password": "selah123",

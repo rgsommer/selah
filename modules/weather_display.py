@@ -246,6 +246,44 @@ def _fetch_openweathermap(api_key, location):
 _cached_forecast = None
 _last_forecast_check = None
 
+# --- optional second location (compact strip on the 5-day panel) -----------
+_second_cache = None
+_second_check = None
+
+
+def _get_second_summary(config):
+    """Compact current-conditions summary for an optional second location:
+    {place, temp, main, hi, lo, boat}. Cached 1h. None when not configured."""
+    global _second_cache, _second_check
+    if not config.get("weather_enabled", False):
+        return None
+    loc = (config.get("forecast_second_location") or "").strip()
+    if not loc:
+        return None
+    api_key = config.get("weather_api_key", "")
+    if not api_key or api_key == "your_openweathermap_api_key":
+        return _second_cache if (_second_cache and _second_cache.get("loc") == loc) else None
+    now = datetime.datetime.now()
+    if (_second_cache and _second_check and _second_cache.get("loc") == loc
+            and (now - _second_check).seconds < 3600):
+        return _second_cache
+    cur = _fetch_openweathermap(api_key, loc)
+    fc = _fetch_forecast(api_key, loc)
+    if not cur and not fc:
+        return _second_cache if (_second_cache and _second_cache.get("loc") == loc) else None
+    today = (fc[0] if fc else {})
+    temp = cur.get("temp") if cur else today.get("hi")
+    main = (cur.get("main") if cur else today.get("main")) or ""
+    place = (cur.get("city") if cur else "") or loc.split(",")[0].strip()
+    _second_cache = {
+        "loc": loc, "place": place,
+        "temp": (round(temp) if temp is not None else None), "main": main,
+        "hi": today.get("hi"), "lo": today.get("lo"),
+        "boat": (_boating_level(today, config) if today else 0),
+    }
+    _second_check = now
+    return _second_cache
+
 
 def _get_forecast(config):
     """Daily 5-day forecast (list of {day, hi, lo, desc, main}); cached 1h."""
@@ -528,21 +566,25 @@ def _render_forecast(screen, forecast, config):
         n = len(forecast)
         if not n:
             return
+        title_font = pygame.font.Font(None, max(30, w // 30))
+        day_font = pygame.font.Font(None, max(26, w // 40))
+        temp_font = pygame.font.Font(None, max(24, w // 46))
+        small = pygame.font.Font(None, max(20, w // 54))
+
+        second = _get_second_summary(config)                 # optional footer strip
+        foot_h = (day_font.get_linesize() + 22) if second else 0
+
         col_w = max(150, min(210, (w - 60) // n))
         panel_w = min(w - 30, n * col_w)
-        panel_h = min(h - 30, max(360, h // 3))
+        panel_h = min(h - 20, max(360, h // 3) + foot_h)
         px, py = (w - panel_w) // 2, (h - panel_h) // 2
         col_w = panel_w // n
+        content_bottom = py + panel_h - foot_h               # columns stop above the footer
 
         bg = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
         pygame.draw.rect(bg, (10, 18, 42, 214), bg.get_rect(), border_radius=16)
         pygame.draw.rect(bg, (60, 110, 180, 230), bg.get_rect(), width=2, border_radius=16)
         screen.blit(bg, (px, py))
-
-        title_font = pygame.font.Font(None, max(30, w // 30))
-        day_font = pygame.font.Font(None, max(26, w // 40))
-        temp_font = pygame.font.Font(None, max(24, w // 46))
-        small = pygame.font.Font(None, max(20, w // 54))
 
         t_s = title_font.render("5-Day Forecast", True, (130, 205, 255))
         screen.blit(t_s, (px + 18, py + 14))
@@ -558,13 +600,14 @@ def _render_forecast(screen, forecast, config):
             nice = _is_nice_day(d, config)
             # Column tint: green for a pleasant-outdoors day, blue for today.
             if nice or is_today:
-                hl = pygame.Surface((col_w - 6, panel_h - (top - py) - 10), pygame.SRCALPHA)
+                hl_h = content_bottom - (top - 6) - 4
+                hl = pygame.Surface((col_w - 6, hl_h), pygame.SRCALPHA)
                 hl.fill((70, 180, 95, 70) if nice else (90, 150, 220, 45))
                 screen.blit(hl, (col_left + 3, top - 6))
                 if is_today and nice:   # both — mark today with a thin border too
                     pygame.draw.rect(screen, (150, 200, 255, 220),
-                                     (col_left + 3, top - 6, col_w - 6,
-                                      panel_h - (top - py) - 10), width=2, border_radius=8)
+                                     (col_left + 3, top - 6, col_w - 6, hl_h),
+                                     width=2, border_radius=8)
 
             # boating badge in the column's top-right corner
             lvl = _boating_level(d, config)
@@ -613,6 +656,31 @@ def _render_forecast(screen, forecast, config):
                 ls = small.render(ln, True, (185, 200, 225))
                 screen.blit(ls, ls.get_rect(center=(cx, y)))
                 y += small.get_linesize()
+
+        # --- optional second-location strip along the bottom ---
+        if second and foot_h:
+            fy0 = py + panel_h - foot_h
+            pygame.draw.line(screen, (60, 95, 150), (px + 18, fy0 + 3),
+                             (px + panel_w - 18, fy0 + 3), 1)
+            fy = fy0 + foot_h // 2 + 3
+            x = px + 22
+            place_s = day_font.render(second.get("place", ""), True, (255, 255, 255))
+            screen.blit(place_s, place_s.get_rect(midleft=(x, fy)))
+            x += place_s.get_width() + 22
+            ir = max(12, small.get_height() // 2 + 5)
+            _draw_weather_icon(screen, x + ir, fy, ir, second.get("main"))
+            x += ir * 2 + 16
+            if second.get("temp") is not None:
+                ct = temp_font.render(f"{second['temp']}°", True, (240, 240, 240))
+                screen.blit(ct, ct.get_rect(midleft=(x, fy)))
+                x += ct.get_width() + 20
+            if second.get("hi") is not None:
+                hlt = small.render(f"H {second['hi']}°   L {second['lo']}°", True, (200, 215, 235))
+                screen.blit(hlt, hlt.get_rect(midleft=(x, fy)))
+                x += hlt.get_width() + 20
+            if second.get("boat"):
+                br = max(11, foot_h // 3)
+                _draw_boat(screen, x + br, fy, br, great=(second["boat"] == 2))
 
         try:
             pygame.display.flip()
@@ -667,48 +735,6 @@ def draw_weather_pill(screen, config, target):
     weather, hi, lo, pos = data
     _render_pill(target, weather, pos, hi, lo)
     return True
-
-
-def _cloud(surf, cx, cy, r, color):
-    pygame.draw.circle(surf, color, (cx - r // 2, cy), r // 2)
-    pygame.draw.circle(surf, color, (cx + r // 2, cy), r // 2)
-    pygame.draw.circle(surf, color, (cx, cy - r // 4), int(r * 0.6))
-    pygame.draw.rect(surf, color, (cx - r, cy, 2 * r, r // 2 + 1))
-
-
-def _draw_weather_icon(surf, cx, cy, r, main):
-    """Draw a small sun/cloud/rain/snow/storm glyph (default font can't do emoji)."""
-    import math
-    m = (main or "").lower()
-    try:
-        if "clear" in m:
-            pygame.draw.circle(surf, (255, 210, 80), (cx, cy), r)
-            for ang in range(0, 360, 45):
-                dx, dy = math.cos(math.radians(ang)), math.sin(math.radians(ang))
-                pygame.draw.line(surf, (255, 210, 80),
-                                 (cx + dx * (r + 2), cy + dy * (r + 2)),
-                                 (cx + dx * (r + r // 2), cy + dy * (r + r // 2)), 2)
-        elif "rain" in m or "drizzle" in m:
-            _cloud(surf, cx, cy - r // 3, r, (185, 190, 200))
-            for i in (-1, 0, 1):
-                pygame.draw.line(surf, (90, 150, 230),
-                                 (cx + i * r // 2, cy + r // 2), (cx + i * r // 2 - 2, cy + r), 2)
-        elif "snow" in m:
-            _cloud(surf, cx, cy - r // 3, r, (215, 220, 230))
-            for i in (-1, 0, 1):
-                pygame.draw.circle(surf, (255, 255, 255), (cx + i * r // 2, cy + r // 2 + 3), 2)
-        elif "thunder" in m:
-            _cloud(surf, cx, cy - r // 3, r, (160, 160, 175))
-            pygame.draw.polygon(surf, (255, 220, 60),
-                                [(cx, cy), (cx - r // 3, cy + r // 2), (cx, cy + r // 3), (cx + r // 4, cy + r)])
-        elif "cloud" in m:
-            _cloud(surf, cx, cy, r, (210, 212, 218))
-        else:  # mist / fog / haze
-            for i in range(3):
-                pygame.draw.line(surf, (200, 200, 205),
-                                 (cx - r, cy - r // 2 + i * (r // 2)), (cx + r, cy - r // 2 + i * (r // 2)), 2)
-    except Exception:
-        pass
 
 
 def _render_pill(target, weather, pos, hi=None, lo=None):
