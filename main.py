@@ -1290,7 +1290,7 @@ def main():
                         show_leaderboard(screens, config)
                     elif event.key == pygame.K_F4:
                         start_quiz_mode(screens, config, portrait_files + landscape_files)
-                    elif event.key == pygame.K_F5:
+                    elif event.key == pygame.K_F6:
                         # Approve every pending sender at once.
                         try:
                             from modules.email_handler import approve_all_pending
@@ -1300,7 +1300,7 @@ def main():
                                                      f"Approved {n} pending sender(s)")
                         except Exception as e:
                             log_error(f"Approve-all failed: {e}")
-                    elif event.key == pygame.K_F6:
+                    elif event.key == pygame.K_F5:
                         # Manually show the info panel: agenda -> 5-day -> off.
                         nxt = {None: "agenda", "agenda": "forecast",
                                "forecast": None}[state.get("manual_panel")]

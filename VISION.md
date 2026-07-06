@@ -110,8 +110,8 @@ All sources are de-duplicated (by content), oriented to the right screen, and me
 | F2 | Sender manager (approve/remove contributors) |
 | F3 | Contributor leaderboard |
 | F4 | Family trivia quiz mode |
-| F5 | Approve all pending senders |
-| F6 | Agenda / 5-day forecast panel |
+| F5 | Agenda / 5-day forecast panel |
+| F6 | Approve all pending senders |
 | F7 | Show today's "On this day" memories |
 | F8 | Feature new photos from the last few days |
 | F9 | Displays off — +1 hr per press (up to 6); nav wakes |
@@ -170,7 +170,7 @@ Everything is editable on the device, no keyboard-into-a-file required:
 | Delete a photo | Del (pick its number, then PIN) |
 | Turn the screens off for a while | F9 (+1 hr per press; Space/arrow wakes) |
 | Invite people | F1 → Family & Friends → Nudge |
-| Approve a sender | F2 on the device (or F5 to approve all) |
+| Approve a sender | F2 on the device (or F6 to approve all) |
 | Edit settings | F1 on the device |
 | See the leaderboard | F3 |
 | Play the quiz | F4 |
