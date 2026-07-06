@@ -326,6 +326,18 @@ def _interval_good(temp, pop, main, config):
     return config.get("nice_day_min_c", 16) <= temp <= config.get("nice_day_max_c", 28)
 
 
+def _interval_boat(temp, pop, wind, main, config):
+    """Is a single 3-hour interval good for boating? (adds the wind limit)."""
+    m = (main or "").lower()
+    if any(b in m for b in ("rain", "snow", "thunder", "drizzle", "sleet", "storm")):
+        return False
+    if wind is None or wind > config.get("boat_good_max_wind_ms", 8):
+        return False
+    if float(pop) * 100 > config.get("boat_good_max_pop", 30):
+        return False
+    return temp >= config.get("boat_good_min_c", 18)
+
+
 def _longest_run(hours):
     """Longest contiguous run of interval-start hours (3h apart). Returns
     (start_hour, last_start_hour) or None."""
@@ -350,12 +362,15 @@ def _fmt_hour(hh):
 
 
 def _good_span(rec):
-    """Format the day's longest good-outdoors window, e.g. '9am-3pm', or None."""
-    run = _longest_run(rec.get("good_hours", []))
-    if not run:
-        return None
-    start, last = run
-    return f"{_fmt_hour(start)}-{_fmt_hour(last + 3)}"   # last interval covers +3h
+    """The day's longest good window as (text, kind). Prefers the boating window
+    (kind='boat') when the day has boating hours, else the outdoors window
+    (kind='out'). (None, None) if neither."""
+    for hours, kind in ((rec.get("boat_hours", []), "boat"),
+                        (rec.get("good_hours", []), "out")):
+        run = _longest_run(hours)
+        if run:
+            return f"{_fmt_hour(run[0])}-{_fmt_hour(run[1] + 3)}", kind
+    return None, None
 
 
 def _fetch_forecast(api_key, location, config=None):
@@ -383,7 +398,7 @@ def _fetch_forecast(api_key, location, config=None):
             deg = wnd.get("deg")                       # direction wind blows FROM
             rec = days.setdefault(key, {"hi": t, "lo": t, "conds": {}, "noon": None,
                                         "pop": 0.0, "wind": None, "wind_deg": None,
-                                        "good_hours": []})
+                                        "good_hours": [], "boat_hours": []})
             rec["hi"] = max(rec["hi"], t)
             rec["lo"] = min(rec["lo"], t)
             rec["conds"][main] = rec["conds"].get(main, 0) + 1
@@ -394,12 +409,15 @@ def _fetch_forecast(api_key, location, config=None):
                     rec["wind_deg"] = deg
                 if _interval_good(t, pop, main, config):
                     rec["good_hours"].append(dt.hour)
+                if _interval_boat(t, pop, wind, main, config):
+                    rec["boat_hours"].append(dt.hour)
             if 11 <= dt.hour <= 15:
                 rec["noon"] = desc
         out = []
         for key in sorted(days)[:5]:
             rec = days[key]
             main = max(rec["conds"], key=rec["conds"].get) if rec["conds"] else ""
+            span, span_kind = _good_span(rec)
             out.append({
                 "day": datetime.date.fromisoformat(key).strftime("%a"),
                 "hi": round(rec["hi"]), "lo": round(rec["lo"]),
@@ -407,7 +425,7 @@ def _fetch_forecast(api_key, location, config=None):
                 "pop": round(rec["pop"] * 100),
                 "wind": (round(rec["wind"], 1) if rec["wind"] is not None else None),
                 "wind_deg": rec.get("wind_deg"),
-                "good_span": _good_span(rec),
+                "good_span": span, "good_span_kind": span_kind,
             })
         return out
     except Exception as e:
@@ -703,11 +721,14 @@ def _render_forecast(screen, forecast, config):
 
             span = d.get("good_span")
             if span:
-                st = small.render(span, True, (120, 220, 140))     # green "good outdoors" window
+                boat_span = d.get("good_span_kind") == "boat"
+                st = small.render(span, True, (120, 220, 140))     # green "good window"
                 sw = st.get_width()
-                # a small sun dot to the left
-                pygame.draw.circle(screen, (250, 200, 70),
-                                   (cx - sw // 2 - 11, y), max(3, small.get_height() // 4))
+                if boat_span:                                      # a little boat for a boating window
+                    _draw_boat(screen, cx - sw // 2 - 15, y, max(7, small.get_height() // 2))
+                else:                                              # a sun dot for a nice-outdoors window
+                    pygame.draw.circle(screen, (250, 200, 70),
+                                       (cx - sw // 2 - 11, y), max(3, small.get_height() // 4))
                 screen.blit(st, st.get_rect(midleft=(cx - sw // 2, y)))
                 y += small.get_linesize() + 2
 
