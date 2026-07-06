@@ -268,7 +268,7 @@ def _get_second_summary(config):
             and (now - _second_check).seconds < 3600):
         return _second_cache
     cur = _fetch_openweathermap(api_key, loc)
-    fc = _fetch_forecast(api_key, loc)
+    fc = _fetch_forecast(api_key, loc, config)
     if not cur and not fc:
         return _second_cache if (_second_cache and _second_cache.get("loc") == loc) else None
     today = (fc[0] if fc else {})
@@ -297,7 +297,7 @@ def _get_forecast(config):
     if _last_forecast_check and (now - _last_forecast_check).seconds < 3600:
         return _cached_forecast
 
-    fc = _fetch_forecast(api_key, config.get("location", "Hamilton,CA"))
+    fc = _fetch_forecast(api_key, config.get("location", "Hamilton,CA"), config)
     if fc:
         _cached_forecast = fc
         _last_forecast_check = now
@@ -315,8 +315,53 @@ def _get_forecast(config):
     return _cached_forecast
 
 
-def _fetch_forecast(api_key, location):
-    """OpenWeather 5-day/3-hour forecast aggregated to daily hi/lo/condition."""
+def _interval_good(temp, pop, main, config):
+    """Is a single 3-hour interval pleasant to be outdoors? (comfortable temp,
+    low chance of rain, not stormy)."""
+    m = (main or "").lower()
+    if any(b in m for b in ("rain", "snow", "thunder", "drizzle", "sleet", "storm")):
+        return False
+    if float(pop) * 100 > config.get("nice_day_max_pop", 35):
+        return False
+    return config.get("nice_day_min_c", 16) <= temp <= config.get("nice_day_max_c", 28)
+
+
+def _longest_run(hours):
+    """Longest contiguous run of interval-start hours (3h apart). Returns
+    (start_hour, last_start_hour) or None."""
+    hours = sorted(set(hours))
+    if not hours:
+        return None
+    runs, s, prev = [], hours[0], hours[0]
+    for hh in hours[1:]:
+        if hh - prev == 3:
+            prev = hh
+        else:
+            runs.append((s, prev))
+            s = prev = hh
+    runs.append((s, prev))
+    return max(runs, key=lambda r: r[1] - r[0])
+
+
+def _fmt_hour(hh):
+    hh %= 24
+    ap = "am" if hh < 12 else "pm"
+    return f"{hh % 12 or 12}{ap}"
+
+
+def _good_span(rec):
+    """Format the day's longest good-outdoors window, e.g. '9am-3pm', or None."""
+    run = _longest_run(rec.get("good_hours", []))
+    if not run:
+        return None
+    start, last = run
+    return f"{_fmt_hour(start)}-{_fmt_hour(last + 3)}"   # last interval covers +3h
+
+
+def _fetch_forecast(api_key, location, config=None):
+    """OpenWeather 5-day/3-hour forecast aggregated to daily hi/lo/condition,
+    plus the daytime window that's good to be outdoors."""
+    config = config or {}
     try:
         import requests
         url = "https://api.openweathermap.org/data/2.5/forecast"
@@ -337,7 +382,8 @@ def _fetch_forecast(api_key, location):
             wind = float(wnd.get("speed", 0) or 0)     # m/s
             deg = wnd.get("deg")                       # direction wind blows FROM
             rec = days.setdefault(key, {"hi": t, "lo": t, "conds": {}, "noon": None,
-                                        "pop": 0.0, "wind": None, "wind_deg": None})
+                                        "pop": 0.0, "wind": None, "wind_deg": None,
+                                        "good_hours": []})
             rec["hi"] = max(rec["hi"], t)
             rec["lo"] = min(rec["lo"], t)
             rec["conds"][main] = rec["conds"].get(main, 0) + 1
@@ -346,6 +392,8 @@ def _fetch_forecast(api_key, location):
                 if rec["wind"] is None or wind > rec["wind"]:
                     rec["wind"] = wind                 # keep the direction of the strongest wind
                     rec["wind_deg"] = deg
+                if _interval_good(t, pop, main, config):
+                    rec["good_hours"].append(dt.hour)
             if 11 <= dt.hour <= 15:
                 rec["noon"] = desc
         out = []
@@ -359,6 +407,7 @@ def _fetch_forecast(api_key, location):
                 "pop": round(rec["pop"] * 100),
                 "wind": (round(rec["wind"], 1) if rec["wind"] is not None else None),
                 "wind_deg": rec.get("wind_deg"),
+                "good_span": _good_span(rec),
             })
         return out
     except Exception as e:
@@ -652,7 +701,17 @@ def _render_forecast(screen, forecast, config):
                 screen.blit(wtxt, wtxt.get_rect(midleft=(cx - ww // 2, y)))
                 y += small.get_linesize() + 2
 
-            for ln in _wrap(d.get("desc", ""), small, col_w - 14)[:2]:
+            span = d.get("good_span")
+            if span:
+                st = small.render(span, True, (120, 220, 140))     # green "good outdoors" window
+                sw = st.get_width()
+                # a small sun dot to the left
+                pygame.draw.circle(screen, (250, 200, 70),
+                                   (cx - sw // 2 - 11, y), max(3, small.get_height() // 4))
+                screen.blit(st, st.get_rect(midleft=(cx - sw // 2, y)))
+                y += small.get_linesize() + 2
+
+            for ln in _wrap(d.get("desc", ""), small, col_w - 14)[:(1 if span else 2)]:
                 ls = small.render(ln, True, (185, 200, 225))
                 screen.blit(ls, ls.get_rect(center=(cx, y)))
                 y += small.get_linesize()
