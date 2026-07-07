@@ -448,6 +448,7 @@ def show_config_gui(screen, config, screens=None):
             ("calendar_start_time", "  Agenda Start (HH:MM)", "str"),
             ("calendar_times", "  Agenda Times (csv HH:MM)", "csv"),
             ("calendar_duration_minutes", "  Agenda Duration (min, 0=all day)", "int"),
+            ("agenda_days", "  Agenda Days Ahead (1-14)", "int"),
             ("weather_enabled", "Weather Display", "bool"),
             ("location", "  Location (City,CC)", "str"),
             ("forecast_second_location", "  2nd Location on 5-day (City,CC)", "str"),

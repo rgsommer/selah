@@ -98,10 +98,11 @@ def _try_google_calendar(config):
             return None
 
         service = build("calendar", "v3", credentials=creds)
-        # Today + tomorrow only, in the display's local timezone.
+        # From midnight today through the next agenda_days, in local time.
         start = datetime.datetime.now().astimezone().replace(
             hour=0, minute=0, second=0, microsecond=0)
-        end = start + datetime.timedelta(days=2)
+        days = max(1, int(config.get("agenda_days", 7)))
+        end = start + datetime.timedelta(days=days)
 
         # By default pull from every calendar the account subscribes to (and
         # keeps visible); set calendar_use_all_calendars:false to read only
@@ -130,7 +131,7 @@ def _try_google_calendar(config):
                     calendarId=cid,
                     timeMin=start.isoformat(),
                     timeMax=end.isoformat(),
-                    maxResults=25,
+                    maxResults=50,
                     singleEvents=True,
                     orderBy="startTime",
                 ).execute()
@@ -197,9 +198,10 @@ def _render_scrolling_calendar(screen, events, config, fill=False):
     try:
         screen_w, screen_h = screen.get_size()
         today = datetime.date.today()
-        tomorrow = today + datetime.timedelta(days=1)
+        days = max(1, int(config.get("agenda_days", 7)))
+        dates = [today + datetime.timedelta(days=i) for i in range(days)]
 
-        grouped = {today: [], tomorrow: []}
+        grouped = {d: [] for d in dates}
         for e in events:
             d, tl = _event_when(e.get("start", ""))
             if d in grouped:
@@ -210,11 +212,23 @@ def _render_scrolling_calendar(screen, events, config, fill=False):
         font = pygame.font.Font(None, font_size)
         small = pygame.font.Font(None, max(20, font_size - 6))
 
-        # Flatten into drawable lines.
+        # Flatten into drawable lines. Today/Tomorrow always show; later days
+        # appear only when they have events, each under a weekday header.
         lines = []  # (kind, payload)
-        for title, d in (("Today", today), ("Tomorrow", tomorrow)):
-            lines.append(("header", title))
+        for i, d in enumerate(dates):
             evs = grouped.get(d, [])
+            if i >= 2 and not evs:
+                continue
+            if i == 0:
+                label = "Today"
+            elif i == 1:
+                label = "Tomorrow"
+            else:
+                try:
+                    label = d.strftime("%a %b %-d")
+                except Exception:
+                    label = d.strftime("%a %b %d")
+            lines.append(("header", label))
             if not evs:
                 lines.append(("empty", "— nothing scheduled"))
             else:
