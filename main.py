@@ -1346,22 +1346,33 @@ def main():
                                     else:
                                         show_toast_if_needed(screens, config, "Wrong code")
                     elif event.key == pygame.K_F7:
-                        # Show today's on-this-day memories now (queue them up).
+                        # Toggle today's on-this-day memories: queue them, or if
+                        # already queued, press again to cancel (clear) them.
                         try:
                             from collections import deque
-                            files = list(dict.fromkeys(portrait_files + landscape_files))
-                            fb = todays_flashbacks(files, config)
-                            shuffle(fb)
                             fq = state.get("flashback_queue")
                             if not isinstance(fq, deque):
                                 fq = deque()
                                 state["flashback_queue"] = fq
-                            for path, year in reversed(fb[:20]):
-                                fq.appendleft((path, f"On this day, {year}"))
-                            show_toast_if_needed(
-                                screens, config,
-                                f"On this day — {len(fb[:20])} memor{'y' if len(fb[:20])==1 else 'ies'}"
-                                if fb else "No memories for today")
+
+                            def _is_otd(c):
+                                return isinstance(c, str) and c.startswith("On this day")
+
+                            if any(_is_otd(c) for _, c in fq):        # already showing -> cancel
+                                kept = [(p, c) for (p, c) in fq if not _is_otd(c)]
+                                fq.clear()
+                                fq.extend(kept)
+                                show_toast_if_needed(screens, config, "On this day — cleared")
+                            else:
+                                files = list(dict.fromkeys(portrait_files + landscape_files))
+                                fb = todays_flashbacks(files, config)
+                                shuffle(fb)
+                                for path, year in reversed(fb[:20]):
+                                    fq.appendleft((path, f"On this day, {year}"))
+                                show_toast_if_needed(
+                                    screens, config,
+                                    f"On this day — {len(fb[:20])} memor{'y' if len(fb[:20])==1 else 'ies'}"
+                                    if fb else "No memories for today")
                         except Exception as e:
                             log_error(f"F7 on-this-day failed: {e}")
                     elif event.key == pygame.K_F8:

@@ -18,7 +18,7 @@ _KEYS = [
     ("F4", "Quiz mode"),
     ("F5", "Agenda / 5-day forecast panel"),
     ("F6", "Approve all pending senders"),
-    ("F7", "Show today's 'On this day' memories"),
+    ("F7", "Show / cancel today's 'On this day' memories"),
     ("F8", "Feature new photos from the last few days"),
     ("F9", "Displays off (+1 hr/press, up to 6; nav wakes)"),
     ("F10", "Edit a photo's caption — pick its number"),
