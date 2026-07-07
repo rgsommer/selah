@@ -73,7 +73,7 @@ DEFAULT_CONFIG = {
     "calendar_start_time": "06:00",
     "calendar_times": [],
     "calendar_duration_minutes": 0,
-    "agenda_days": 7,                # how many days ahead the agenda shows (1 = today only)
+    "agenda_days": 3,                # how many days ahead the calendar view shows (1 = today only)
     "google_calendar_id": "primary",
     "calendar_use_all_calendars": True,
     "info_panel_split": True,
