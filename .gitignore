@@ -23,6 +23,9 @@ calendar_cache.json
 orientation_cache.json
 drive_sync_state.json
 invite_log.json
+processed_emails.json
+nudge_log.json
+forecast_cache.json
 __pycache__/
 *.pyc
 

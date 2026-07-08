@@ -9,6 +9,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
 from email.utils import parsedate_to_datetime, parseaddr
 import io
+import hashlib
 import modules.heif_support  # noqa: F401  (HEIC thumbnails)
 from pathlib import Path
 import re
@@ -22,13 +23,64 @@ from modules.logger import log_error
 __all__ = ["check_for_new_emails", "log_error"]
 
 
+PROCESSED_FILE = "processed_emails.json"
+
+
+def _load_processed():
+    """(processed {message_id: iso}, file_existed). We track handled emails
+    ourselves so intake never depends on the unread flag."""
+    try:
+        with open(PROCESSED_FILE) as f:
+            return json.load(f), True
+    except FileNotFoundError:
+        return {}, False
+    except Exception:
+        return {}, True   # corrupt -> don't re-seed (avoids a reply flood)
+
+
+def _save_processed(d):
+    try:
+        with open(PROCESSED_FILE, "w") as f:
+            json.dump(d, f)
+    except Exception as e:
+        log_error(f"Failed to save {PROCESSED_FILE}: {e}")
+
+
+def _prune_processed(d, days):
+    """Drop entries older than `days` (kept well beyond the search window so
+    nothing is ever reprocessed)."""
+    cutoff = datetime.datetime.now() - datetime.timedelta(days=days)
+    for mid in list(d):
+        try:
+            if datetime.datetime.fromisoformat(d[mid]) < cutoff:
+                del d[mid]
+        except Exception:
+            del d[mid]
+
+
+def _msg_id(msg):
+    """A stable key for an email: its Message-ID, else a from+subject+date hash."""
+    if msg is None:
+        return None
+    mid = (msg.get("Message-ID") or msg.get("Message-Id") or "").strip()
+    if mid:
+        return mid
+    key = f"{msg.get('From', '')}|{msg.get('Subject', '')}|{msg.get('Date', '')}"
+    return "fallback:" + hashlib.md5(key.encode("utf-8", "replace")).hexdigest()
+
+
 def check_for_new_emails(config, screens):
-    """Check Gmail for new unread emails with media attachments."""
+    """Process every recent email we haven't handled yet, tracked by Message-ID
+    (not the unread flag), so a network blip or an email opened in Gmail can never
+    make a submission slip through. Read state is left untouched (BODY.PEEK)."""
     if not config.get("email_address") or not config.get("email_password"):
         return
     if config.get("email_password") == "your-app-specific-password":
         return  # Placeholder password, skip
 
+    lookback = max(1, int(config.get("email_lookback_days", 7)))
+    processed, existed = _load_processed()
+    now_iso = datetime.datetime.now().isoformat()
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -36,127 +88,42 @@ def check_for_new_emails(config, screens):
             mail.login(config["email_address"], config["email_password"])
             mail.select("inbox")
 
-            _, data = mail.search(None, "UNSEEN")
-            if not data[0]:
-                mail.logout()
-                return
+            since = (datetime.date.today()
+                     - datetime.timedelta(days=lookback)).strftime("%d-%b-%Y")
+            _, data = mail.search(None, f'(SINCE {since})')
+            nums = data[0].split() if data and data[0] else []
 
-            for num in data[0].split():
-                _, msg_data = mail.fetch(num, "(RFC822)")
-                msg = email.message_from_bytes(msg_data[0][1])
-
-                sender = msg.get("from", "")
-                subject = msg.get("subject", "")
-
-                # Ignore bounce / delivery-failure notices — they carry Gmail's
-                # icon images that were being saved as junk "photos".
-                if _is_bounce(sender, subject, msg):
+            seeded = handled = 0
+            for num in nums:
+                # Cheap header fetch for the Message-ID (does not mark read).
+                _, hd = mail.fetch(
+                    num, "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT DATE)])")
+                hdr = (email.message_from_bytes(hd[0][1])
+                       if hd and hd[0] else None)
+                mid = _msg_id(hdr) or f"uid:{num.decode() if isinstance(num, bytes) else num}"
+                if mid in processed:
                     continue
-
-                # Check for approval replies first
-                if _is_approval_reply(subject, msg, config):
-                    continue
-
-                # Opt-out request ("stop" / "unsubscribe" with no photo).
-                if _is_optout(subject, msg):
-                    addr = _extract_email(sender)
-                    if addr:
-                        add_nudge_optout(addr)
-                        _send_optout_confirmation(addr, config)
-                        print(f"[Selah] {addr} opted out of reminders")
-                    continue
-
-                # Opt-in request ("start") — re-subscribe.
-                if _is_optin(subject, msg):
-                    addr = _extract_email(sender)
-                    if addr and addr.lower() in load_nudge_optout():
-                        remove_nudge_optout(addr)
-                        _send_optin_confirmation(addr, config)
-                        print(f"[Selah] {addr} re-subscribed to reminders")
-                    continue
-
-                approved_senders = load_approved_senders()
-                if approved_senders and not any(s in sender for s in approved_senders):
-                    _handle_unapproved_sender(sender, msg, config, screens)
-                    continue
-
-                subject_date = parse_subject_date(subject)   # a greeting date, or None
-                date = subject_date or get_email_date(msg)
-
-                # The subject line is the caption shown under the photo; the
-                # email body is only a fallback when the subject is empty.
-                caption = _subject_caption(subject)
-                if not caption:
-                    for part in msg.walk():
-                        if part.get_content_type() == "text/plain":
-                            try:
-                                caption = extract_caption(
-                                    part.get_payload(decode=True).decode(errors="replace"))
-                            except Exception:
-                                pass
-                            break
-
-                # Photos are detected by content-type (catches inline + HEIC).
-                saved_paths = []     # newly written this pass
-                reply_photos = []    # every photo in the email (new OR already saved)
-                had_media = False
-                final_date = date
-                for filename, data in iter_media_parts(msg):
-                    had_media = True
-                    file_path = save_media_bytes(data, filename, config, sender)
-                    if not file_path:
-                        # Already on disk (a re-send, or a repull imported it).
-                        # We still acknowledge the sender, reusing the stored copy
-                        # for the reply thumbnail.
-                        existing = os.path.join(
-                            config.get("email_dir", "media/email"),
-                            _sender_folder(sender), filename)
-                        if os.path.exists(existing):
-                            reply_photos.append(existing)
+                # First run: seed already-handled (read) mail without acting, so
+                # we don't re-reply; only act on still-unread mail.
+                if not existed:
+                    _, fl = mail.fetch(num, "(FLAGS)")
+                    if fl and fl[0] and b"\\Seen" in fl[0]:
+                        processed[mid] = now_iso
+                        seeded += 1
                         continue
-                    saved_paths.append(file_path)
-                    reply_photos.append(file_path)
-                    # A dated greeting (date in the subject) is scheduled for
-                    # its day; explicit year -> that year only, else every year.
-                    if subject_date:
-                        try:
-                            from modules.scheduled_media import add_scheduled
-                            add_scheduled(
-                                file_path, subject_date.strftime("%m-%d"),
-                                caption=caption, recurring=not _subject_has_year(subject),
-                                target_iso=subject_date.isoformat())
-                        except Exception as e:
-                            log_error(f"Greeting schedule failed: {e}")
-                    final_date = date or get_file_date(file_path)
-                    queue_media(file_path, final_date, caption, config)
-                    try:
-                        from modules.leaderboard import update_leaderboard
-                        update_leaderboard(sender, 1)
-                    except Exception:
-                        pass
-                    try:
-                        from modules.cloud_backup import backup_to_drive
-                        if config.get("cloud_backup_enabled", False):
-                            backup_to_drive(file_path, config)
-                    except Exception:
-                        pass
-                    try:
-                        from modules.pending_photos import add as _queue_new
-                        _queue_new(file_path)   # surface at the next rotation
-                    except Exception:
-                        pass
-                    try:
-                        from modules.new_photo_hint import note_new_photo
-                        note_new_photo(kind="email")
-                    except Exception:
-                        pass
-                    log_media(file_path, sender, final_date, caption)
+                # Fetch the full message and handle it (still no read-flag change).
+                _, full = mail.fetch(num, "(BODY.PEEK[])")
+                if full and full[0]:
+                    _process_email(email.message_from_bytes(full[0][1]), config, screens)
+                    handled += 1
+                processed[mid] = now_iso
 
-                # Acknowledge EVERY email that contained a photo — even ones we
-                # already had on disk — so a submitter always hears back.
-                if had_media:
-                    send_auto_reply(sender, config, final_date, reply_photos, caption)
-
+            if not existed and seeded:
+                print(f"[Selah] Email intake: seeded {seeded} already-handled message(s)")
+            if handled:
+                print(f"[Selah] Email intake: handled {handled} new message(s)")
+            _prune_processed(processed, max(30, lookback * 3))
+            _save_processed(processed)
             mail.logout()
             break
 
@@ -179,6 +146,108 @@ def check_for_new_emails(config, screens):
                 except Exception:
                     pass
             time.sleep(5)
+
+
+def _process_email(msg, config, screens):
+    """Handle one email end-to-end: bounce/approval/opt-out/opt-in/unapproved, or
+    save its photos and send one confirmation with thumbnails."""
+    sender = msg.get("from", "")
+    subject = msg.get("subject", "")
+
+    # Ignore bounce / delivery-failure notices (they carry Gmail icon "photos").
+    if _is_bounce(sender, subject, msg):
+        return
+    if _is_approval_reply(subject, msg, config):
+        return
+    if _is_optout(subject, msg):
+        addr = _extract_email(sender)
+        if addr:
+            add_nudge_optout(addr)
+            _send_optout_confirmation(addr, config)
+            print(f"[Selah] {addr} opted out of reminders")
+        return
+    if _is_optin(subject, msg):
+        addr = _extract_email(sender)
+        if addr and addr.lower() in load_nudge_optout():
+            remove_nudge_optout(addr)
+            _send_optin_confirmation(addr, config)
+            print(f"[Selah] {addr} re-subscribed to reminders")
+        return
+
+    approved_senders = load_approved_senders()
+    if approved_senders and not any(s in sender for s in approved_senders):
+        _handle_unapproved_sender(sender, msg, config, screens)
+        return
+
+    subject_date = parse_subject_date(subject)   # a greeting date, or None
+    date = subject_date or get_email_date(msg)
+
+    # The subject line is the caption; the body is a fallback when it's empty.
+    caption = _subject_caption(subject)
+    if not caption:
+        for part in msg.walk():
+            if part.get_content_type() == "text/plain":
+                try:
+                    caption = extract_caption(
+                        part.get_payload(decode=True).decode(errors="replace"))
+                except Exception:
+                    pass
+                break
+
+    # Photos are detected by content-type (catches inline + HEIC).
+    saved_paths = []     # newly written this pass
+    reply_photos = []    # every photo in the email (new OR already saved)
+    had_media = False
+    final_date = date
+    for filename, data in iter_media_parts(msg):
+        had_media = True
+        file_path = save_media_bytes(data, filename, config, sender)
+        if not file_path:
+            # Already on disk — still acknowledge, reuse the stored copy for the
+            # reply thumbnail.
+            existing = os.path.join(config.get("email_dir", "media/email"),
+                                    _sender_folder(sender), filename)
+            if os.path.exists(existing):
+                reply_photos.append(existing)
+            continue
+        saved_paths.append(file_path)
+        reply_photos.append(file_path)
+        if subject_date:
+            try:
+                from modules.scheduled_media import add_scheduled
+                add_scheduled(file_path, subject_date.strftime("%m-%d"),
+                              caption=caption, recurring=not _subject_has_year(subject),
+                              target_iso=subject_date.isoformat())
+            except Exception as e:
+                log_error(f"Greeting schedule failed: {e}")
+        final_date = date or get_file_date(file_path)
+        queue_media(file_path, final_date, caption, config)
+        try:
+            from modules.leaderboard import update_leaderboard
+            update_leaderboard(sender, 1)
+        except Exception:
+            pass
+        try:
+            from modules.cloud_backup import backup_to_drive
+            if config.get("cloud_backup_enabled", False):
+                backup_to_drive(file_path, config)
+        except Exception:
+            pass
+        try:
+            from modules.pending_photos import add as _queue_new
+            _queue_new(file_path)   # surface at the next rotation
+        except Exception:
+            pass
+        try:
+            from modules.new_photo_hint import note_new_photo
+            note_new_photo(kind="email")
+        except Exception:
+            pass
+        log_media(file_path, sender, final_date, caption)
+
+    # Acknowledge EVERY email that contained a photo — even ones already on disk.
+    if had_media:
+        send_auto_reply(sender, config, final_date, reply_photos, caption)
 
 
 def parse_subject_date(subject):

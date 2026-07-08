@@ -108,6 +108,7 @@ DEFAULT_CONFIG = {
     "calendar_display_enabled": False,
     "email_address": "",
     "email_password": "",
+    "email_lookback_days": 7,        # how far back intake scans for unhandled email
     "imap_server": "imap.gmail.com",
     "smtp_server": "smtp.gmail.com",
     "smtp_port": 587,
