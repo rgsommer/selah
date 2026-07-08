@@ -38,12 +38,27 @@ def _in_window(config, kind, minutes):
         return False
 
 
+_chosen = {}   # (kind, date) -> path: one stable photo per event per day
+
+
 def _pick(config, kind):
+    # Choose ONE photo per sunrise/sunset per day and hold it steady through the
+    # window (don't re-randomize every render — that flickers/looks busy).
+    key = (kind, datetime.date.today().isoformat())
+    prev = _chosen.get(key)
+    if prev and os.path.exists(prev):
+        return prev
     d = config.get(_MAP[kind][1], _MAP[kind][2])
     try:
         files = [os.path.join(d, f) for f in os.listdir(d) if f.lower().endswith(_EXTS)]
         if files:
-            return random.choice(files)
+            p = random.choice(files)
+            _chosen[key] = p
+            # keep the map tiny — only today's picks matter
+            today = datetime.date.today().isoformat()
+            for k in [k for k in _chosen if k[1] != today]:
+                _chosen.pop(k, None)
+            return p
     except Exception as e:
         log_error(f"{kind} folder read failed: {e}")
     return None
