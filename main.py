@@ -750,8 +750,20 @@ def _draw_time_weather(screens, config, fade):
             pass
 
 
-def _blit_image_fill(surface, path):
-    """Cover-scale an image to fill `surface` (centered, cropped)."""
+def _sun_label(kind, dt):
+    """Format e.g. 'Sunset 8:42 PM' for a sunrise/sunset event, or None."""
+    if not kind or not dt:
+        return None
+    try:
+        t = dt.strftime("%-I:%M %p")
+    except Exception:
+        t = dt.strftime("%H:%M")
+    return f"{kind.capitalize()} {t}"
+
+
+def _blit_image_fill(surface, path, label=None):
+    """Cover-scale an image to fill `surface` (centered, cropped). If `label` is
+    given (e.g. the actual sunrise/sunset time), superimpose it in a pill."""
     try:
         from modules.display_handler import _load_surface
         img = _load_surface(path)
@@ -763,6 +775,21 @@ def _blit_image_fill(surface, path):
         img = pygame.transform.smoothscale(img, (max(1, int(iw * scale)), max(1, int(ih * scale))))
         surface.fill((0, 0, 0))
         surface.blit(img, ((sw - img.get_width()) // 2, (sh - img.get_height()) // 2))
+        if label:
+            font = pygame.font.Font(None, max(28, sw // 20))
+            txt = font.render(label, True, (255, 244, 220))
+            pad = max(10, sw // 60)
+            r = max(6, sw // 44)                       # small sun disc
+            pw = txt.get_width() + pad * 3 + r * 2
+            ph = txt.get_height() + pad
+            px = (sw - pw) // 2
+            py = sh - ph - max(16, sh // 22)
+            pill = pygame.Surface((pw, ph), pygame.SRCALPHA)
+            pill.fill((0, 0, 0, 150))
+            surface.blit(pill, (px, py))
+            cy = py + ph // 2
+            pygame.draw.circle(surface, (255, 200, 70), (px + pad + r, cy), r)
+            surface.blit(txt, (px + pad * 2 + r * 2, py + (ph - txt.get_height()) // 2))
     except Exception as e:
         log_error(f"Sunrise image blit failed: {e}")
 
@@ -815,10 +842,10 @@ def _draw_night(screens, config):
         return targets
 
     # Sunrise/sunset photo takes the moon's place during its window.
-    sunrise_img = None
+    sunrise_img = sr_kind = sr_dt = None
     try:
         from modules import sunrise as _sunrise
-        sunrise_img = _sunrise.active_image(config)
+        sunrise_img, sr_kind, sr_dt = _sunrise.active_event(config)
     except Exception:
         pass
 
@@ -836,7 +863,7 @@ def _draw_night(screens, config):
             except Exception:
                 left = right = screen
             if sunrise_img:
-                _blit_image_fill(left, sunrise_img)
+                _blit_image_fill(left, sunrise_img, _sun_label(sr_kind, sr_dt))
             elif config.get("moon_phase_enabled", True):
                 show_moon_phase(left, config)
             targets.append(right)
@@ -1799,13 +1826,14 @@ def main():
             # During the +/-5 min sunrise window, split the screen: sunrise on
             # the LEFT if the agenda/5-day panel is up (panel stays right), else
             # sunrise on the RIGHT with photos on the left.
-            sunrise_img = None
+            sunrise_img = sr_kind = sr_dt = None
             if active:
                 try:
                     from modules import sunrise as _sunrise
-                    sunrise_img = _sunrise.active_image(config)
+                    sunrise_img, sr_kind, sr_dt = _sunrise.active_event(config)
                 except Exception:
                     sunrise_img = None
+            sun_label = _sun_label(sr_kind, sr_dt)
 
             if active and sunrise_img:
                 photo_subs = {}
@@ -1818,13 +1846,13 @@ def main():
                     except Exception:
                         left = right = s
                     if panel_kind:                       # sunrise left, panel right
-                        _blit_image_fill(left, sunrise_img)
+                        _blit_image_fill(left, sunrise_img, sun_label)
                         if panel_kind == "forecast":
                             render_forecast_panel(right, config)
                         else:
                             render_agenda_panel(right, config)
                     else:                                # photos left, sunrise right
-                        _blit_image_fill(right, sunrise_img)
+                        _blit_image_fill(right, sunrise_img, sun_label)
                         _render_one_screen(t, left, portrait_files, landscape_files,
                                            state, config, media_log, is_single, current_ts)
                         photo_subs[t] = left

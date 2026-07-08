@@ -49,15 +49,21 @@ def _pick(config, kind):
     return None
 
 
-def active_image(config):
-    """A sunrise/sunset photo path if within either window now, else None."""
+def active_event(config):
+    """(path, kind, event_dt) for the active sunrise/sunset window, else
+    (None, None, None). kind is 'sunrise' or 'sunset'."""
     minutes = config.get("sunrise_window_minutes", 5)
     for kind in ("sunrise", "sunset"):
         if _in_window(config, kind, minutes):
             p = _pick(config, kind)
             if p:
-                return p
-    return None
+                return p, kind, _event_dt(kind)
+    return None, None, None
+
+
+def active_image(config):
+    """A sunrise/sunset photo path if within either window now, else None."""
+    return active_event(config)[0]
 
 
 # Back-compat single-event helpers (sunrise).
