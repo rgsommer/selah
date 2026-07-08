@@ -522,6 +522,20 @@ def _render_frame(screen, frame, config, media_log):
         log_error(f"Render frame failed: {e}")
 
 
+def _clear_screens(screens):
+    """Wipe every screen to black — call after a full-screen modal (F1-F4) closes
+    so translucent panels (agenda/forecast/sunrise) don't show it behind them."""
+    for s in screens.values():
+        try:
+            s.fill((0, 0, 0))
+        except Exception:
+            pass
+    try:
+        pygame.display.flip()
+    except Exception:
+        pass
+
+
 def _redraw_current(screens, state, config, media_log):
     """Re-render each photo screen's current frame (from history) with the current
     media_log, then re-draw overlays. Clears transient number badges and reflects
@@ -1310,13 +1324,21 @@ def main():
                         # Reload settings that may have changed
                         rotate_interval = config.get("rotate_interval", 10)
                         motion_timeout = config.get("motion_timeout", 300)
+                        _clear_screens(screens)          # wipe the GUI from the buffer
+                        state["nav_request"] = 1
                     elif event.key == pygame.K_F2:
                         target = screens.get("landscape") or screens.get("portrait")
                         show_sender_manager(target, config)
+                        _clear_screens(screens)
+                        state["nav_request"] = 1
                     elif event.key == pygame.K_F3:
                         show_leaderboard(screens, config)
+                        _clear_screens(screens)
+                        state["nav_request"] = 1
                     elif event.key == pygame.K_F4:
                         start_quiz_mode(screens, config, portrait_files + landscape_files)
+                        _clear_screens(screens)
+                        state["nav_request"] = 1
                     elif event.key == pygame.K_F6:
                         # Approve every pending sender at once.
                         try:
