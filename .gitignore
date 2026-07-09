@@ -26,6 +26,7 @@ invite_log.json
 processed_emails.json
 nudge_log.json
 forecast_cache.json
+selah.log
 __pycache__/
 *.pyc
 
