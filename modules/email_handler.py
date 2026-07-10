@@ -204,11 +204,20 @@ def _process_email(msg, config, screens):
         file_path = save_media_bytes(data, filename, config, sender)
         if not file_path:
             # Already on disk — still acknowledge, reuse the stored copy for the
-            # reply thumbnail.
+            # reply thumbnail, and (if this is a dated greeting) make sure it's
+            # scheduled — so re-sending with a corrected date takes effect.
             existing = os.path.join(config.get("email_dir", "media/email"),
                                     _sender_folder(sender), filename)
             if os.path.exists(existing):
                 reply_photos.append(existing)
+                if subject_date:
+                    try:
+                        from modules.scheduled_media import add_scheduled
+                        add_scheduled(existing, subject_date.strftime("%m-%d"),
+                                      caption=caption, recurring=not _subject_has_year(subject),
+                                      target_iso=subject_date.isoformat())
+                    except Exception as e:
+                        log_error(f"Greeting schedule (resend) failed: {e}")
             continue
         saved_paths.append(file_path)
         reply_photos.append(file_path)
@@ -263,24 +272,25 @@ def parse_subject_date(subject):
             return datetime.datetime.strptime(iso_match.group(1), "%Y-%m-%d").date()
         except ValueError:
             pass
-    # Try month+day: May 10, Oct 15, January 1
+    # Try month+day: 'May 10', 'Oct 15', 'Sept 4', 'Sept. 4', 'January 1'.
+    # Match a 3-letter month stem + any remaining letters (so Sep/Sept/September
+    # all work) + optional '.', then map the stem straight to a month number
+    # (avoids strptime's locale abbreviations, where 'Sept' is invalid).
+    _MONTHS = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+               "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
     month_day = re.search(
-        r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
-        r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
-        r"\s+(\d{1,2})",
-        subject, re.I
-    )
+        r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})\b",
+        subject, re.I)
     if month_day:
         try:
-            month_str = month_day.group(1)
-            day_str = month_day.group(2)
+            m = _MONTHS[month_day.group(1).lower()]
+            day = int(month_day.group(2))
             year = datetime.datetime.now().year
-            # Try full month name first, then abbreviated
-            for fmt in ["%B %d %Y", "%b %d %Y"]:
-                try:
-                    return datetime.datetime.strptime(f"{month_str} {day_str} {year}", fmt).date()
-                except ValueError:
-                    continue
+            d = datetime.date(year, m, day)
+            # No year given -> use the next occurrence, not a past one.
+            if d < datetime.date.today() and not _subject_has_year(subject):
+                d = datetime.date(year + 1, m, day)
+            return d
         except Exception:
             pass
     # Relative: "2nd Sunday of May", "last Monday of October" (Mother's Day etc.)
