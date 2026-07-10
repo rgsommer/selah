@@ -107,7 +107,7 @@ def show_upload_qr_now(screens, config, seconds=60):
     url = _upload_url(config)
     print(f"[Selah] Upload QR URL: {url}")   # visible in the console for debugging
     try:
-        big = _build_qr(url, target_px=460)   # large, easy to scan from a distance
+        big = _build_qr(url, target_px=int(config.get("qr_size_px", 230)))
     except Exception as e:
         log_error(f"QR build failed: {e}")
         return

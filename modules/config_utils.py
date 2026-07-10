@@ -48,6 +48,7 @@ DEFAULT_CONFIG = {
     "upload_qr_interval_minutes": 30,
     "upload_qr_seconds": 20,
     "qr_upload_url": "",
+    "qr_size_px": 230,               # on-demand (F11) QR size in px
     "web_control_port": 5000,
     "coming_up_enabled": False,
     "coming_up_interval_minutes": 20,
