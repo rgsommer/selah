@@ -251,12 +251,12 @@ def start_web_server(config, screens):
                 continue
             try:
                 data = f.read()
-                dest = save_media_bytes(data, fn, config, sender=name)
+                dest, is_new = save_media_bytes(data, fn, config, sender=name)
             except Exception as e:
                 log_error(f"Web upload save failed: {e}")
                 skipped += 1
                 continue
-            if not dest:                       # exact-duplicate content
+            if not dest or not is_new:         # error, or exact-duplicate content
                 skipped += 1
                 continue
             try:

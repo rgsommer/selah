@@ -201,27 +201,13 @@ def _process_email(msg, config, screens):
     final_date = date
     for filename, data in iter_media_parts(msg):
         had_media = True
-        file_path = save_media_bytes(data, filename, config, sender)
+        file_path, is_new = save_media_bytes(data, filename, config, sender)
         if not file_path:
-            # Already on disk — still acknowledge, reuse the stored copy for the
-            # reply thumbnail, and (if this is a dated greeting) make sure it's
-            # scheduled — so re-sending with a corrected date takes effect.
-            existing = os.path.join(config.get("email_dir", "media/email"),
-                                    _sender_folder(sender), filename)
-            if os.path.exists(existing):
-                reply_photos.append(existing)
-                if subject_date:
-                    try:
-                        from modules.scheduled_media import add_scheduled
-                        add_scheduled(existing, subject_date.strftime("%m-%d"),
-                                      caption=caption, recurring=not _subject_has_year(subject),
-                                      target_iso=subject_date.isoformat())
-                    except Exception as e:
-                        log_error(f"Greeting schedule (resend) failed: {e}")
             continue
-        saved_paths.append(file_path)
+        # file_path is the correct on-disk copy of THIS photo (new or existing),
+        # so the reply always thumbnails the right image.
         reply_photos.append(file_path)
-        if subject_date:
+        if subject_date:                        # (re-)schedule a dated greeting
             try:
                 from modules.scheduled_media import add_scheduled
                 add_scheduled(file_path, subject_date.strftime("%m-%d"),
@@ -229,6 +215,9 @@ def _process_email(msg, config, screens):
                               target_iso=subject_date.isoformat())
             except Exception as e:
                 log_error(f"Greeting schedule failed: {e}")
+        if not is_new:                          # already on disk — nothing more to do
+            continue
+        saved_paths.append(file_path)
         final_date = date or get_file_date(file_path)
         queue_media(file_path, final_date, caption, config)
         try:
@@ -482,19 +471,21 @@ def save_media_bytes(data, filename, config, sender=None):
     """Write photo/video bytes under media/email/<sender>/.
 
     Dedups by CONTENT, not filename: generic names like 'photo_1.jpg' collide
-    across different submissions, so a name clash alone must NOT drop a new
-    photo. Returns the saved path, or None only if these exact bytes are already
-    on disk (a true duplicate). A same-named but different photo is saved under
-    a unique '<name>_N' so it isn't lost."""
+    across different submissions, so a name clash alone must NOT drop a new photo.
+    Returns (path, is_new): `path` is the on-disk file that holds these exact
+    bytes — a fresh save (is_new=True) or the EXISTING duplicate (is_new=False,
+    the real matching path, which may be a '<name>_N' suffix). (None, False) on
+    error. Returning the true matching path is what keeps a re-send's reply
+    thumbnail correct."""
     try:
         folder = Path(config.get("email_dir", "media/email")) / _sender_folder(sender)
         folder.mkdir(parents=True, exist_ok=True)
         dest = folder / filename
         if dest.exists():
             if _same_bytes(dest, data):
-                return None                   # identical content — real duplicate
-            # Same name, different photo — find a free unique name (and still
-            # bail if the identical content already sits under a suffix).
+                return str(dest), False       # identical content — real duplicate
+            # Same name, different photo — find a free unique name (and return the
+            # matching path if the identical content already sits under a suffix).
             base, ext = os.path.splitext(filename)
             i = 1
             while True:
@@ -503,14 +494,14 @@ def save_media_bytes(data, filename, config, sender=None):
                     dest = cand
                     break
                 if _same_bytes(cand, data):
-                    return None
+                    return str(cand), False
                 i += 1
         with open(dest, "wb") as f:
             f.write(data)
-        return str(dest)
+        return str(dest), True
     except Exception as e:
         log_error(f"Failed to save media: {e}", critical=False, config=config)
-        return None
+        return None, False
 
 
 def save_attachment(part, config, sender=None):

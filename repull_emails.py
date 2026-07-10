@@ -92,17 +92,15 @@ def main():
 
         photo_paths = []
         for filename, data in iter_media_parts(msg):
-            dest = save_media_bytes(data, filename, cfg, sender)
-            if dest is None:                  # already had it
+            dest, is_new = save_media_bytes(data, filename, cfg, sender)
+            if not dest:
+                continue
+            photo_paths.append(dest)          # correct on-disk copy (new or existing)
+            if not is_new:                    # already had it
                 skipped_existing += 1
-                existing = os.path.join(cfg.get("email_dir", "media/email"),
-                                        _sender_folder(sender), filename)
-                if os.path.exists(existing):
-                    photo_paths.append(existing)
                 continue
             log_media(dest, sender, sdate or get_file_date(dest), caption or "")
             saved += 1
-            photo_paths.append(dest)
             print(f"  saved: {dest}")
         # Reply to any email that contained a photo (new or already-imported),
         # with thumbnails of that email's photos.
