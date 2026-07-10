@@ -199,7 +199,7 @@ def _process_email(msg, config, screens):
     reply_photos = []    # every photo in the email (new OR already saved)
     had_media = False
     final_date = date
-    for filename, data in iter_media_parts(msg):
+    for filename, data in iter_media_parts(msg, min_image_px=config.get("min_email_image_px", 500)):
         had_media = True
         file_path, is_new = save_media_bytes(data, filename, config, sender)
         if not file_path:
@@ -432,10 +432,23 @@ _VID_MIME_EXT = {
 }
 
 
-def iter_media_parts(msg, min_image_bytes=15000):
+def _image_too_small(data, min_px):
+    """True if the image's largest side is under min_px (a signature logo/icon)."""
+    if not min_px:
+        return False
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as im:
+            return max(im.size) < int(min_px)
+    except Exception:
+        return False   # can't measure -> keep it (don't drop a real photo)
+
+
+def iter_media_parts(msg, min_image_bytes=15000, min_image_px=500):
     """Yield (filename, bytes) for photo/video parts, detected by content-type
     so inline images and HEIC files are caught (not just 'attachment' parts).
-    Tiny images (email-signature logos, tracking pixels) are skipped."""
+    Tiny images — email-signature logos, tracking pixels — are skipped, both by
+    byte size and by pixel dimensions (a logo is small even if it's not tiny)."""
     idx = 0
     for part in msg.walk():
         if part.get_content_maintype() == "multipart":
@@ -450,8 +463,11 @@ def iter_media_parts(msg, min_image_bytes=15000):
             data = None
         if not data:
             continue
-        if ctype in _IMG_MIME_EXT and len(data) < min_image_bytes:
-            continue  # skip signature logos / pixels
+        if ctype in _IMG_MIME_EXT:
+            if len(data) < min_image_bytes:
+                continue  # tiny by bytes — signature pixel
+            if _image_too_small(data, min_image_px):
+                continue  # small dimensions — signature logo/icon
         fn = part.get_filename()
         if not fn or not fn.lower().endswith(tuple(list(_IMG_MIME_EXT.values()) +
                                                    list(_VID_MIME_EXT.values()))):
