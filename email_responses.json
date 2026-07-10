@@ -1,14 +1,14 @@
 [
   {
     "condition": "immediate",
-    "message": "Thanks! Your photo is now showing on the Selah display!\n\nTip: You can schedule a photo for a special date (like a birthday or anniversary) by including the date in your subject line. For example:\n\n  Subject: Happy Birthday Mom May 10\n  Subject: Anniversary 2026-06-15\n\nThe first sentence of your email becomes the caption shown under the photo. Send as many photos as you like!"
+    "message": "Thanks! Your photo is now showing on the Selah display!\n\nYour subject line becomes the caption shown under the photo.\n\nTip: To save a photo for a special date (a birthday or anniversary), put the date in the subject line:\n\n  Subject: Happy Birthday, Mom Sept 4       (shows EVERY year on that date)\n  Subject: Merry Christmas 2026-12-25        (add a year to show it once)\n\nSend as many photos as you like!"
   },
   {
     "condition": "scheduled",
-    "message": "Thanks! Your photo is queued to display on {date}.\n\nThe first sentence of your email will appear as the caption under the photo. You can send more photos anytime \u2014 just email them to this address!\n\nTip: If you want a photo to show right away instead of on a specific date, just leave the date out of the subject line."
+    "message": "Thanks! Your photo is saved to display on {date}.\n\nIt will appear first thing that morning, alongside everyone's greetings and that day's memories. Your subject line is the caption shown under the photo.\n\nTip: To show a photo right away instead, just leave the date out of the subject line."
   },
   {
     "condition": "default",
-    "message": "Thanks for your photo! It's been added to the Selah display.\n\nHere's how to get the most out of it:\n\n  \u2022 To schedule a photo for a specific date, put the date in the subject line (e.g. \"Happy Birthday Dad June 20\" or \"2026-12-25\")\n  \u2022 To display immediately, just send without a date\n  \u2022 The first sentence of your email becomes the caption shown under the photo\n  \u2022 You can send JPG, PNG, or even MP4/MOV videos\n\nKeep the photos coming!"
+    "message": "Thanks for your photo! It's been added to the Selah display.\n\nHere's how it works:\n\n  • Your subject line becomes the caption shown under the photo\n  • To save a photo for a date, put it in the subject (e.g. \"Happy Birthday, Dad June 20\") — with no year it shows EVERY year; add a year (\"2026-12-25\") to show it once\n  • To display now, just send without a date\n  • JPG, PNG, and MP4/MOV videos all work\n\nKeep the photos coming!"
   }
 ]
