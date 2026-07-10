@@ -231,11 +231,14 @@ def _process_email(msg, config, screens):
                 backup_to_drive(file_path, config)
         except Exception:
             pass
-        try:
-            from modules.pending_photos import add as _queue_new
-            _queue_new(file_path)   # surface at the next rotation
-        except Exception:
-            pass
+        # Surface it right away ONLY if it's an immediate submission. A dated
+        # greeting must WAIT for its day (it's excluded from rotation until then).
+        if not subject_date:
+            try:
+                from modules.pending_photos import add as _queue_new
+                _queue_new(file_path)   # surface at the next rotation
+            except Exception:
+                pass
         try:
             from modules.new_photo_hint import note_new_photo
             note_new_photo(kind="email")

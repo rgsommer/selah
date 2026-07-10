@@ -318,11 +318,16 @@ def _recent_media_items(config, days):
             log = json.load(f)
     except Exception:
         return []
+    try:
+        from modules.scheduled_media import scheduled_paths
+        sched = scheduled_paths()
+    except Exception:
+        sched = set()
     cutoff = datetime.datetime.now() - datetime.timedelta(days=max(1, days))
     seen, items = set(), []
     for e in reversed(log):                         # newest first
         p, ts = e.get("file_path"), e.get("timestamp")
-        if not p or not ts or p in seen or not os.path.exists(p):
+        if not p or not ts or p in seen or p in sched or not os.path.exists(p):
             continue
         if p.lower().endswith(VIDEO_EXTS):
             continue
