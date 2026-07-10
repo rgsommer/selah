@@ -664,8 +664,10 @@ def _render_forecast(screen, forecast, config):
             cx = px + i * col_w + col_w // 2
             col_left = px + i * col_w
             is_today = d.get("day") == today
-            nice = _is_nice_day(d, config)
-            # Column tint: green for a pleasant-outdoors day, blue for today.
+            lvl = _boating_level(d, config)
+            # Green tint = pleasant outdoors OR good boating (so a calm, hot day
+            # that shows a boat is also tinted — they stay consistent).
+            nice = _is_nice_day(d, config) or lvl >= 1
             if nice or is_today:
                 hl_h = content_bottom - (top - 6) - 4
                 hl = pygame.Surface((col_w - 6, hl_h), pygame.SRCALPHA)
@@ -677,7 +679,6 @@ def _render_forecast(screen, forecast, config):
                                      width=2, border_radius=8)
 
             # boating badge in the column's top-right corner
-            lvl = _boating_level(d, config)
             if lvl:
                 br = max(11, col_w // 11)
                 _draw_boat(screen, col_left + col_w - br - 8, top + br + 2, br, great=(lvl == 2))

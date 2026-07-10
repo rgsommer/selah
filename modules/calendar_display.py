@@ -212,13 +212,12 @@ def _render_scrolling_calendar(screen, events, config, fill=False):
         font = pygame.font.Font(None, font_size)
         small = pygame.font.Font(None, max(20, font_size - 6))
 
-        # Flatten into drawable lines. Today/Tomorrow always show; later days
-        # appear only when they have events, each under a weekday header.
+        # Flatten into drawable lines — a header for every day in the window
+        # (so the agenda_days setting is visible), with its events or 'nothing
+        # scheduled'. If it overflows the panel the tail is clipped when drawn.
         lines = []  # (kind, payload)
         for i, d in enumerate(dates):
             evs = grouped.get(d, [])
-            if i >= 2 and not evs:
-                continue
             if i == 0:
                 label = "Today"
             elif i == 1:
