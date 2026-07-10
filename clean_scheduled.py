@@ -33,10 +33,14 @@ def main():
         print(f"Can't read {PATH}: {e}")
         return
 
-    kept, dropped_junk, dropped_dup, recap = [], [], 0, 0
+    kept, dropped_junk, dropped_dup, dropped_missing, recap = [], [], 0, 0, 0
     seen = set()
     for e in items:
         cap = e.get("caption", "") or ""
+        path = e.get("path", "")
+        if path and not os.path.exists(path):     # file deleted -> dangling entry
+            dropped_missing += 1
+            continue
         if MONTH_YEAR.match(cap):                 # album label mis-scheduled
             dropped_junk.append((e.get("mmdd"), cap))
             continue
@@ -52,6 +56,7 @@ def main():
         kept.append(e)
 
     print(f"scheduled greetings: {len(items)} -> {len(kept)}")
+    print(f"  drop {dropped_missing} entry(ies) whose photo was deleted")
     print(f"  drop {len(dropped_junk)} 'Month YYYY' album-label entries "
           + (f"(e.g. {dropped_junk[0][1]!r})" if dropped_junk else ""))
     print(f"  drop {dropped_dup} duplicate(s)")
