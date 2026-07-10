@@ -484,8 +484,9 @@ def show_config_gui(screen, config, screens=None):
             ("manual_navigation_pause", "Nav Pause (sec)", "int"),
 
             # --- Captions / overlays ---
-            ("show_file_name", "Show File Name", "bool"),
-            ("show_file_date", "Show File Date", "bool"),
+            ("show_file_name", "Show File Name (as caption)", "bool"),
+            ("hide_generic_filenames", "  Hide junk names (IMG_1234, photo-1)", "bool"),
+            ("show_file_date", "Show Photo Date", "bool"),
             ("show_caption", "Show Caption", "bool"),
             ("delete_enabled", "Allow Delete (Del key)", "bool"),
             ("delete_pin", "  Delete Code (PIN)", "str"),

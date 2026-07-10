@@ -8,11 +8,67 @@ Key design principles:
 """
 
 import os
+import re
 import time
 import random
+import datetime
 import subprocess
 import pygame
 from modules.logger import log_error
+
+# Auto-generated / camera filenames that read as junk, not captions.
+_GENERIC_NAME_RE = re.compile(
+    r"^(photo[-_ ]?\d|img[-_ ]?\d|dsc[nf]?[-_ ]?\d|pxl[-_ ]?\d|vid[-_ ]?\d|"
+    r"mvimg|gopr\d|screen[ _-]?shot|screenshot|image([-_ ]?\d|$)|fb[-_]?img|"
+    r"whatsapp|signal[-_]|untitled|scan[-_ ]?\d|\d{6,}|[0-9a-f]{12,}$)",
+    re.I)
+
+
+def _is_generic_filename(stem):
+    """True if a filename stem looks auto-generated (IMG_1234, photo-1, PXL_...,
+    Screenshot, all-digits, hex blob) rather than a meaningful caption."""
+    stem = (stem or "").strip()
+    if not stem:
+        return True
+    return bool(_GENERIC_NAME_RE.match(stem))
+
+
+_photo_date_cache = {}
+
+
+def _photo_date_str(path):
+    """A 'photo date' for the overlay: EXIF capture date if present, else the
+    file's modified date, formatted 'Jul 4, 2026'. Cached per file+mtime."""
+    try:
+        mtime = os.path.getmtime(path)
+    except Exception:
+        mtime = 0
+    ck = (path, mtime)
+    if ck in _photo_date_cache:
+        return _photo_date_cache[ck]
+    out = None
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            ex = im.getexif()
+            raw = ex.get(306)                      # DateTime
+            try:
+                sub = ex.get_ifd(0x8769)           # Exif IFD
+                raw = sub.get(36867) or sub.get(36868) or raw   # DateTimeOriginal/Digitized
+            except Exception:
+                pass
+        if raw:
+            dt = datetime.datetime.strptime(str(raw)[:19], "%Y:%m:%d %H:%M:%S")
+            out = dt.strftime("%b %-d, %Y")
+    except Exception:
+        out = None
+    if not out and mtime:
+        try:
+            out = datetime.datetime.fromtimestamp(mtime).strftime("%b %-d, %Y")
+        except Exception:
+            out = None
+    _photo_date_cache[ck] = out
+    return out
 
 try:
     import vlc
@@ -389,11 +445,18 @@ def _draw_overlay(screen, file_path, config, file_date=None, caption=None):
         items = []
         if config.get("show_caption", False) and caption:
             items.append(f"{caption}")
-        if config.get("show_file_date", False) and file_date:
-            date_str = file_date if isinstance(file_date, str) else str(file_date)
-            items.append(f"{date_str}")
+        if config.get("show_file_date", False):
+            # Prefer the known media date; otherwise derive from EXIF / file date.
+            date_str = ((file_date if isinstance(file_date, str) else str(file_date))
+                        if file_date else _photo_date_str(file_path))
+            if date_str:
+                items.append(date_str)
         if config.get("show_file_name", True):
-            items.append(os.path.basename(file_path))
+            stem = os.path.splitext(os.path.basename(file_path))[0]
+            # Skip auto-generated names (IMG_1234 etc.); show meaningful ones
+            # (which the user uses as captions) — without the extension.
+            if not (config.get("hide_generic_filenames", True) and _is_generic_filename(stem)):
+                items.append(stem)
 
         # Draw from bottom up with semi-transparent background
         for text_str in items:

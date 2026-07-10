@@ -167,6 +167,7 @@ DEFAULT_CONFIG = {
     "custom_email_responses": True,
     "submit_drive_url": "",          # shareable Drive folder link for big batches (shown in emails)
     "show_file_name": True,
+    "hide_generic_filenames": True,  # don't show junk names (IMG_1234, photo-1) as captions
     "show_file_date": True,
     "show_caption": True,
     "show_submitter": True,          # append '— from <Name>' to a submitted photo's caption
