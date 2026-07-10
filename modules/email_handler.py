@@ -345,8 +345,7 @@ def _subject_caption(subject):
         r"\s*(?:1st|2nd|3rd|4th|5th|first|second|third|fourth|fifth|last)\s+"
         r"(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+of\s+"
         r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*$",
-        r"\s*(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
-        r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+        r"\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
         r"\s+\d{1,2}(?:st|nd|rd|th)?\s*$",
     ]
     for pat in patterns:
