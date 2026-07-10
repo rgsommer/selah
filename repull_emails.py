@@ -29,7 +29,7 @@ from modules.config_utils import load_config
 from modules.email_handler import (
     _is_bounce, _subject_caption, parse_subject_date, extract_caption,
     get_file_date, log_media, iter_media_parts, save_media_bytes, send_auto_reply,
-    _sender_folder,
+    _sender_folder, _subject_has_year,
 )
 
 
@@ -108,7 +108,8 @@ def main():
         # with thumbnails of that email's photos.
         if photo_paths and do_reply:
             try:
-                send_auto_reply(sender, cfg, sdate, photo_paths, caption)
+                _rec = bool(sdate) and not _subject_has_year(subject)
+                send_auto_reply(sender, cfg, sdate, photo_paths, caption, recurring=_rec)
                 replies += 1
                 print(f"  replied to: {sender} ({len(photo_paths)} photo(s))")
             except Exception as e:

@@ -255,8 +255,12 @@ def _process_email(msg, config, screens):
         log_media(file_path, sender, final_date, caption)
 
     # Acknowledge EVERY email that contained a photo — even ones already on disk.
+    # Pass the greeting date (None for an immediate submission) so the reply reads
+    # correctly; a no-year date recurs every year.
     if had_media:
-        send_auto_reply(sender, config, final_date, reply_photos, caption)
+        recurring = bool(subject_date) and not _subject_has_year(subject)
+        send_auto_reply(sender, config, subject_date, reply_photos, caption,
+                        recurring=recurring)
 
 
 def parse_subject_date(subject):
@@ -658,16 +662,32 @@ def _submit_guidance(config):
     return plain, html
 
 
-def send_auto_reply(sender, config, date, photos=None, caption=None):
+def _when_phrase(date, recurring):
+    """How to phrase the display date in the reply: 'September 4 (every year)' for
+    a recurring greeting, 'December 25, 2026' for a one-time one, or None."""
+    if not date:
+        return None
+    try:
+        d = date if hasattr(date, "strftime") else datetime.date.fromisoformat(str(date)[:10])
+    except Exception:
+        return str(date)
+    return d.strftime("%B %-d") + " (every year)" if recurring else d.strftime("%B %-d, %Y")
+
+
+def send_auto_reply(sender, config, date, photos=None, caption=None, recurring=False):
     """Send a formatted confirmation, plural-aware, with thumbnails of the
-    submitted photos inline (the caption shown under each)."""
+    submitted photos inline (the caption shown under each). `date` is the greeting
+    date (None for an immediate submission); `recurring` phrases a yearly greeting."""
     if not config.get("email_address") or not config.get("email_password"):
         return
     photos = photos or []
     count = len(photos) or 1
     owner = config["email_address"]
     try:
-        body = get_custom_response(sender, date, config, count)
+        # Feed a recurring-aware date string to the templates so a no-year greeting
+        # reads 'every year', and a non-dated submission reads 'immediate'.
+        when = _when_phrase(date, recurring)
+        body = get_custom_response(sender, when, config, count)
         guide_plain, guide_html = _submit_guidance(config)
 
         # Build inline thumbnails (skip videos / unreadable).
