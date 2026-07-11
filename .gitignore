@@ -11,6 +11,7 @@ token.json
 display_config.json
 special_days.json
 approved_senders.json
+unapproved_senders.json
 contacts.json
 
 # Runtime state & logs
@@ -59,3 +60,4 @@ recent_shown.json
 
 # Personal per-email name overrides (may contain real emails)
 sender_aliases.json
+pending_approvals.json
