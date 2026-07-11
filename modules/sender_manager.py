@@ -24,10 +24,12 @@ def show_sender_manager(screen, config):
         title_font = pygame.font.Font(None, font_size + 10)
 
         selected = 0
+        scroll = 0
         adding = False
         add_buffer = ""
         running = True
         clock = pygame.time.Clock()
+        max_rows = 1
 
         while running:
             screen.fill((20, 30, 20))
@@ -37,37 +39,59 @@ def show_sender_manager(screen, config):
             screen.blit(title, (20, 10))
 
             instructions = font.render(
-                "Up/Down=Navigate  A=Add  D=Delete  ESC=Close",
+                "Up/Down  PgUp/PgDn  Home/End   A=Add  D=Delete  ESC=Close",
                 True, (150, 150, 150)
             )
             screen.blit(instructions, (20, 15 + title_font.get_linesize()))
 
-            y = 60 + title_font.get_linesize()
+            list_top = 60 + title_font.get_linesize()
+            row_h = font_size + 10
+            # Reserve space at the bottom for the add-email prompt when active.
+            bottom_reserve = (row_h * 3 + 20) if adding else 10
+            avail = max(row_h, screen_h - list_top - bottom_reserve)
+            max_rows = max(1, avail // row_h)
 
             if not senders:
                 msg = font.render("No approved senders (all senders allowed)", True, (200, 200, 100))
-                screen.blit(msg, (20, y))
-                y += font_size + 10
+                screen.blit(msg, (20, list_top))
+            else:
+                # Keep the selected row inside the visible window.
+                if selected < scroll:
+                    scroll = selected
+                elif selected >= scroll + max_rows:
+                    scroll = selected - max_rows + 1
+                scroll = max(0, min(scroll, max(0, len(senders) - max_rows)))
 
-            for i, sender in enumerate(senders):
-                if i == selected:
-                    highlight = pygame.Surface((screen_w - 20, font_size + 8), pygame.SRCALPHA)
-                    highlight.fill((40, 80, 40, 150))
-                    screen.blit(highlight, (10, y - 3))
+                y = list_top
+                for i in range(scroll, min(scroll + max_rows, len(senders))):
+                    if i == selected:
+                        highlight = pygame.Surface((screen_w - 20, font_size + 8), pygame.SRCALPHA)
+                        highlight.fill((40, 80, 40, 150))
+                        screen.blit(highlight, (10, y - 3))
+                    color = (255, 255, 255) if i == selected else (200, 200, 200)
+                    text = font.render(f"  {senders[i]}", True, color)
+                    screen.blit(text, (20, y))
+                    y += row_h
 
-                color = (255, 255, 255) if i == selected else (200, 200, 200)
-                text = font.render(f"  {sender}", True, color)
-                screen.blit(text, (20, y))
-                y += font_size + 10
+                # "more above / below" hints + position counter.
+                counter = font.render(f"{selected + 1}/{len(senders)}", True, (150, 150, 150))
+                screen.blit(counter, (screen_w - counter.get_width() - 20,
+                                      15 + title_font.get_linesize()))
+                if scroll > 0:
+                    up = font.render("▲ more", True, (120, 200, 120))
+                    screen.blit(up, (screen_w - up.get_width() - 20, list_top - row_h + 2))
+                if scroll + max_rows < len(senders):
+                    dn = font.render("▼ more", True, (120, 200, 120))
+                    screen.blit(dn, (screen_w - dn.get_width() - 20, list_top + max_rows * row_h - 2))
 
-            # Add mode
+            # Add mode — anchored at the bottom, independent of the scrolled list.
             if adding:
-                y += 20
+                ay = screen_h - bottom_reserve + 10
                 prompt = font.render("Enter email address:", True, (255, 255, 100))
-                screen.blit(prompt, (20, y))
-                y += font_size + 5
+                screen.blit(prompt, (20, ay))
+                ay += font_size + 5
                 input_text = font.render(f"  {add_buffer}_", True, (255, 255, 255))
-                screen.blit(input_text, (20, y))
+                screen.blit(input_text, (20, ay))
 
             try:
                 pygame.display.flip()
@@ -98,6 +122,14 @@ def show_sender_manager(screen, config):
                             selected = min(selected + 1, len(senders) - 1)
                         elif event.key == pygame.K_UP and senders:
                             selected = max(selected - 1, 0)
+                        elif event.key == pygame.K_PAGEDOWN and senders:
+                            selected = min(selected + max_rows, len(senders) - 1)
+                        elif event.key == pygame.K_PAGEUP and senders:
+                            selected = max(selected - max_rows, 0)
+                        elif event.key == pygame.K_HOME and senders:
+                            selected = 0
+                        elif event.key == pygame.K_END and senders:
+                            selected = len(senders) - 1
                         elif event.key == pygame.K_a:
                             adding = True
                             add_buffer = ""
