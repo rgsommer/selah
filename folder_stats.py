@@ -45,6 +45,18 @@ def main():
     private_tokens = [str(t).lower() for t in cfg.get("private_dirs", ["private"])]
     min_px = int(cfg.get("min_photo_px", 0) or 0)
 
+    # The blur filter (hide_blurry) drops out-of-focus photos AFTER scanning, so
+    # they're reached-but-hidden, not a coverage gap. Recognise those via the
+    # quality cache so they don't masquerade as "not reached".
+    blur_on = cfg.get("hide_blurry_enabled", False)
+    blur_threshold = float(cfg.get("blur_threshold", 60))
+    try:
+        from modules import quality
+        blur_cache = quality._load() if blur_on else {}
+        blur_exts = quality.IMAGE_EXTS
+    except Exception:
+        blur_cache, blur_exts = {}, ()
+
     media_folder = cfg.get("media_folder", "media")
     # Roots to WALK (audit the whole tree; the scanner in 'separate' mode only
     # visits specific sub-roots, which is the thing we're checking).
@@ -56,7 +68,8 @@ def main():
 
     # folder -> counters
     stats = defaultdict(lambda: {"total": 0, "reached": 0, "held": 0,
-                                 "excluded": 0, "missed": 0, "miss_ex": []})
+                                 "blurry": 0, "excluded": 0, "missed": 0,
+                                 "miss_ex": []})
     seen = set()
 
     def classify_excluded(p, ext):
@@ -74,6 +87,15 @@ def main():
                 return "corrupt"
             if min_px and 0 < edge < min_px:
                 return "tiny"
+        # Dropped by the blur filter (intentional, not a coverage gap).
+        if blur_on and ext in blur_exts:
+            try:
+                mt = os.path.getmtime(p)
+            except Exception:
+                mt = 0
+            s = blur_cache.get(f"{p}|{mt}")
+            if s is not None and s < blur_threshold:
+                return "blurry"
         return None
 
     for root in roots:
@@ -95,7 +117,9 @@ def main():
                     s["held"] += 1
                 else:
                     why = classify_excluded(p, os.path.splitext(f)[1].lower())
-                    if why:
+                    if why == "blurry":
+                        s["blurry"] += 1
+                    elif why:
                         s["excluded"] += 1
                     else:
                         s["missed"] += 1
@@ -103,7 +127,7 @@ def main():
                             s["miss_ex"].append(f)
 
     tot = {k: sum(s[k] for s in stats.values())
-           for k in ("total", "reached", "held", "excluded", "missed")}
+           for k in ("total", "reached", "held", "blurry", "excluded", "missed")}
 
     print(f"media_mode = {cfg.get('media_mode', 'separate')}   "
           f"(hide_blurry={cfg.get('hide_blurry_enabled', False)}, "
@@ -122,21 +146,24 @@ def main():
         print("✅ Every eligible file in every folder is reached (or held/excluded on purpose).\n")
 
     if show_all:
-        print("All folders (eligible / reached / held / excluded / MISSED):")
+        print("All folders (eligible / reached / held / blurry / excluded / MISSED):")
         for k in sorted(stats, key=str.lower):
             s = stats[k]
             flag = "  ⚠" if s["missed"] else ""
             print(f"   {k:<44} {s['total']:>5}  r{s['reached']} h{s['held']} "
-                  f"x{s['excluded']} m{s['missed']}{flag}")
+                  f"b{s['blurry']} x{s['excluded']} m{s['missed']}{flag}")
         print()
 
     print("Totals:")
     print(f"  eligible files ......... {tot['total']}")
     print(f"  reaching rotation ...... {tot['reached']}")
     print(f"  held (scheduled) ....... {tot['held']}")
+    if blur_on:
+        print(f"  hidden by blur filter .. {tot['blurry']}   "
+              f"(hide_blurry on, threshold {blur_threshold:g})")
     print(f"  excluded (private/corrupt/tiny/video-off) ... {tot['excluded']}")
-    print(f"  NOT reached ............ {tot['missed']}"
-          + ("   ⚠ see folders above" if tot['missed'] else ""))
+    print(f"  NOT reached (unexplained) ... {tot['missed']}"
+          + ("   ⚠ see folders above" if tot['missed'] else "   ✅"))
 
 
 if __name__ == "__main__":
