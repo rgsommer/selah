@@ -1090,6 +1090,55 @@ def approve_all_pending(config):
     return len(pending)
 
 
+def approve_pending_sender(sender_email, config):
+    """Approve ONE pending sender: whitelist them, move their held photos into
+    the display folder, and drop their pending entries. Returns files moved, or
+    -1 if no pending entry matched that email."""
+    target = (sender_email or "").strip().lower()
+    pending = _load_pending()
+    take = [e for e in pending if (e.get("sender_email") or "").strip().lower() == target]
+    keep = [e for e in pending if (e.get("sender_email") or "").strip().lower() != target]
+    if not take:
+        return -1
+    senders = load_approved_senders()
+    display_dir = Path(config.get("display_dir", "media/display"))
+    display_dir.mkdir(parents=True, exist_ok=True)
+    moved = 0
+    for entry in take:
+        em = (entry.get("sender_email") or "").strip()
+        if em and em not in senders:
+            senders.append(em)
+        for fp in entry.get("files", []):
+            try:
+                p = Path(fp)
+                if p.exists():
+                    dest = display_dir / p.name
+                    n = 1
+                    while dest.exists():
+                        dest = display_dir / f"{p.stem}_{n}{p.suffix}"
+                        n += 1
+                    p.rename(dest)
+                    moved += 1
+            except Exception as e:
+                log_error(f"Failed to move pending file {fp}: {e}")
+    _save_approved_senders(senders)
+    _save_pending(keep)
+    print(f"[Selah] Approved {sender_email}: {moved} file(s)")
+    return moved
+
+
+def reject_pending_sender(sender_email):
+    """Discard a pending sender's approval request without whitelisting them.
+    Returns True if any pending entry was removed."""
+    target = (sender_email or "").strip().lower()
+    pending = _load_pending()
+    keep = [e for e in pending if (e.get("sender_email") or "").strip().lower() != target]
+    if len(keep) == len(pending):
+        return False
+    _save_pending(keep)
+    return True
+
+
 def send_annual_invites(config):
     """Send an annual invite to all approved senders reminding them to submit photos.
 
