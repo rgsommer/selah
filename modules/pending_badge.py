@@ -1,8 +1,8 @@
 """Subtle on-screen badge for pending sender approvals.
 
 Instead of a toast that takes over a screen, a small unobtrusive chip in the
-corner of the landscape screen shows how many senders are waiting, and that
-F5 approves them all.
+corner of the landscape screen shows how many senders are waiting. F6 approves
+them all; F2 opens the sender manager to review/approve individually.
 """
 
 import pygame
@@ -37,7 +37,7 @@ def _draw(screen, n):
     try:
         w, h = screen.get_size()
         font = pygame.font.Font(None, max(20, w // 60))
-        label = f"{n} pending  ·  F5 to approve all"
+        label = f"{n} pending  ·  F6 approve all  ·  F2 to review"
         text = font.render(label, True, (255, 232, 160))
         pad = 8
         tw, th = text.get_size()
