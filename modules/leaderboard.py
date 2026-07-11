@@ -11,8 +11,14 @@ def update_leaderboard(sender, count=1):
     """Add submission count for a sender."""
     try:
         data = _load_leaderboard()
-        # Clean sender name (extract email or name)
-        name = sender.split("<")[0].strip().strip('"').strip("'")
+        # Prefer an explicit per-email alias, else the From display name.
+        try:
+            from modules.sender_aliases import alias_for
+            name = alias_for(sender)
+        except Exception:
+            name = None
+        if not name:
+            name = sender.split("<")[0].strip().strip('"').strip("'")
         if not name:
             name = sender
         data[name] = data.get(name, 0) + count

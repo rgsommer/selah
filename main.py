@@ -70,8 +70,13 @@ def _submitter_label(sender):
     """A friendly first name for the submitter, or '' to skip (owner/visitor/local
     photos have no useful sender to show)."""
     from email.utils import parseaddr
+    try:
+        from modules.sender_aliases import alias_for
+        alias = alias_for(sender)
+    except Exception:
+        alias = None
     name, addr = parseaddr(sender or "")
-    label = (name or "").strip().strip('"')
+    label = (alias or name or "").strip().strip('"')
     if not label and addr:
         label = re.split(r"[._@]", addr)[0]
     label = label.strip()

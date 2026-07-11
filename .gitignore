@@ -56,3 +56,6 @@ sunset/*.jpg
 sunset/*.jpeg
 sunset/*.png
 recent_shown.json
+
+# Personal per-email name overrides (may contain real emails)
+sender_aliases.json

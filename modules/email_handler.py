@@ -833,7 +833,13 @@ def _handle_unapproved_sender(sender, msg, config, screens):
 
     # Extract sender email address
     sender_email = _extract_email(sender)
-    sender_name = sender.split("<")[0].strip().strip('"').strip("'") or sender_email
+    try:
+        from modules.sender_aliases import alias_for
+        sender_name = alias_for(sender)
+    except Exception:
+        sender_name = None
+    if not sender_name:
+        sender_name = sender.split("<")[0].strip().strip('"').strip("'") or sender_email
 
     # Save any attachments to a pending folder
     pending_files = []
