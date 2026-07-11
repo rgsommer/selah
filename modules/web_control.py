@@ -273,6 +273,14 @@ def start_web_server(config, screens):
                 note_new_photo(kind="upload")
             except Exception:
                 pass
+            # Count QR/web uploads on the leaderboard too (the form collects the
+            # uploader's name). Skip the anonymous "Visitor" fallback.
+            if name and name != "Visitor":
+                try:
+                    from modules.leaderboard import update_leaderboard
+                    update_leaderboard(name, 1)
+                except Exception:
+                    pass
             saved += 1
 
         if saved:
