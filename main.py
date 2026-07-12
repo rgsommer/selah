@@ -298,9 +298,9 @@ def _maybe_feature_recent(state, config):
     if not isinstance(fq, deque):
         fq = deque()
         state["flashback_queue"] = fq
-    added = 0
-    for e in reversed(log):                     # newest first, capped
-        if added >= 20:
+    batch = []
+    for e in reversed(log):                     # scan newest first, capped at 20
+        if len(batch) >= 20:
             break
         p = e.get("file_path")
         ts = e.get("timestamp")
@@ -311,8 +311,9 @@ def _maybe_feature_recent(state, config):
                 continue
         except Exception:
             continue
-        fq.append((p, e.get("caption") or ""))
-        added += 1
+        batch.append((p, e.get("caption") or ""))
+    shuffle(batch)                              # scatter them in random order
+    fq.extend(batch)
 
 
 def _recent_media_items(config, days):
