@@ -94,8 +94,23 @@ def _try_google_calendar(config):
         if os.path.exists("token.json"):
             creds = Credentials.from_authorized_user_file("token.json")
 
-        if not creds or not creds.valid:
+        if not creds:
             return None
+        # Access tokens expire ~hourly. Refresh (and re-save) instead of giving
+        # up — otherwise the agenda goes blank an hour after every restart and
+        # silently falls back to the empty local calendar.
+        if not creds.valid:
+            from google.auth.transport.requests import Request
+            if creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                    with open("token.json", "w") as f:
+                        f.write(creds.to_json())
+                except Exception as e:
+                    log_error(f"Calendar token refresh failed: {e}")
+                    return None
+            else:
+                return None
 
         service = build("calendar", "v3", credentials=creds)
         # From midnight today through the next agenda_days, in local time.
