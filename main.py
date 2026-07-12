@@ -1061,8 +1061,13 @@ def _prompt_pick_photo(screens, numbered, verb="Delete"):
         clock.tick(30)
 
 
+# Discrete inputs that should cut a rotation short so navigation feels instant.
+# Deliberately NOT motion events (MOUSEMOTION / FINGERMOTION): a touchscreen —
+# or phantom SDL touch noise on the Pi — fires those continuously, which would
+# end the sleep immediately and flip photos far faster than rotate_interval. A
+# swipe still begins with FINGERDOWN, so touch navigation stays responsive.
 _INTERRUPT_EVENTS = (pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN,
-                     pygame.FINGERDOWN, pygame.FINGERMOTION)
+                     pygame.FINGERDOWN)
 
 
 def _responsive_sleep(seconds):

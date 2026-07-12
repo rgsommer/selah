@@ -37,11 +37,21 @@ def handle_events(screens, config, portrait_files, landscape_files, state, event
                 # Arrow keys + Space are handled in the main loop (they browse
                 # full renders / toggle pause); we leave them for it.
 
-            # Touchscreen swipe -> request a browse step (main loop renders it).
-            elif event.type == pygame.FINGERMOTION:
-                if abs(event.dx) > 0.05 or abs(event.dy) > 0.05:
-                    primary = event.dx if abs(event.dx) >= abs(event.dy) else event.dy
-                    state["nav_request"] = 1 if primary > 0 else -1
+            # Touchscreen swipe -> browse one step. Detect it from the whole
+            # gesture (finger down -> up), NOT per-motion dx: a resting finger or
+            # phantom SDL touch noise fires FINGERMOTION continuously, which used
+            # to advance the photo every frame and made rotation ignore the
+            # interval. A tap (tiny displacement) is ignored.
+            elif event.type == pygame.FINGERDOWN:
+                state["_swipe_start"] = (event.x, event.y)
+            elif event.type == pygame.FINGERUP:
+                start = state.get("_swipe_start")
+                state["_swipe_start"] = None
+                if start:
+                    dx, dy = event.x - start[0], event.y - start[1]
+                    if max(abs(dx), abs(dy)) > 0.12:   # deliberate swipe
+                        primary = dx if abs(dx) >= abs(dy) else dy
+                        state["nav_request"] = 1 if primary > 0 else -1
 
     except SystemExit:
         raise
