@@ -7,6 +7,10 @@ from modules.logger import log_error
 
 _last_calendar_check = None
 _cached_events = []
+_last_fetch_ok = True
+
+_CAL_TTL = 600          # normal refresh cadence (seconds)
+_CAL_RETRY = 90         # retry sooner after a failed fetch
 
 
 def _parse_hhmm(value):
@@ -65,17 +69,37 @@ def show_calendar_if_scheduled(screens, config):
 
 
 def _get_calendar_events(config):
-    """Fetch calendar events from Google Calendar API or local file."""
-    global _last_calendar_check, _cached_events
+    """Fetch calendar events from Google Calendar API or local file.
+
+    A failed fetch (DNS blip, token stumble, network not up yet after the
+    overnight screen-off) must NOT blank the agenda: we keep the last
+    known-good events and retry sooner, rather than caching an empty result
+    for the full TTL and claiming 'nothing scheduled'.
+    """
+    global _last_calendar_check, _cached_events, _last_fetch_ok
 
     now = datetime.datetime.now()
-    # Cache for 10 minutes
-    if _last_calendar_check and (now - _last_calendar_check).seconds < 600:
-        return _cached_events
+    if _last_calendar_check:
+        # total_seconds(), not .seconds — the latter ignores whole days, so a
+        # gap over 24h would look fresh and pin a stale cache.
+        age = (now - _last_calendar_check).total_seconds()
+        if 0 <= age < (_CAL_TTL if _last_fetch_ok else _CAL_RETRY):
+            return _cached_events
 
-    events = _try_google_calendar(config)
-    if not events:
-        events = _try_local_calendar()
+    events = _try_google_calendar(config)       # None = fetch failed
+    if events is None:
+        local = _try_local_calendar() or []
+        _last_fetch_ok = False
+        if local:
+            events = local
+        elif _cached_events:
+            log_error("Calendar fetch failed — keeping last known events")
+            _last_calendar_check = now
+            return _cached_events
+        else:
+            events = []
+    else:
+        _last_fetch_ok = True
 
     _cached_events = events
     _last_calendar_check = now
