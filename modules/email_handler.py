@@ -274,8 +274,12 @@ def parse_subject_date(subject):
     # (avoids strptime's locale abbreviations, where 'Sept' is invalid).
     _MONTHS = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
                "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
+    # Accept an ordinal suffix ("Sept 4th") — _subject_caption strips those, so
+    # the date parser must recognise them too, or a greeting like "... Laura
+    # Sept 4th" gets its caption cleaned but is shown immediately instead of
+    # being held for the date.
     month_day = re.search(
-        r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})\b",
+        r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b",
         subject, re.I)
     if month_day:
         try:
