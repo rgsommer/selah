@@ -1071,6 +1071,36 @@ _INTERRUPT_EVENTS = (pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN,
                      pygame.FINGERDOWN)
 
 
+def _sleep_pumping_toast(seconds, screens, config):
+    """Like _responsive_sleep, but animate/erase an on-screen toast while waiting
+    so it fades out and clears after its 15s instead of sitting until the next
+    rotation. Only the toast's bar region is redrawn (cheap); the photo/panel is
+    untouched."""
+    from modules.toast import pump_toast, is_active
+    if not is_active():
+        _responsive_sleep(seconds)
+        return
+    end = time.time() + max(0.0, seconds)
+    while time.time() < end:
+        try:
+            pygame.event.pump()
+            hits = pygame.event.get(_INTERRUPT_EVENTS)
+            if hits:
+                for e in hits:
+                    try:
+                        pygame.event.post(e)
+                    except Exception:
+                        pass
+                return
+        except Exception:
+            pass
+        try:
+            pump_toast(screens, config)
+        except Exception:
+            pass
+        pygame.time.delay(50)
+
+
 def _responsive_sleep(seconds):
     """Sleep up to `seconds`, but return the instant an input event arrives so
     arrows / spacebar / F-keys / touch / swipe act immediately instead of waiting
@@ -1900,7 +1930,7 @@ def main():
                     pass
                 if photo_subs:
                     _draw_overlays(photo_subs, config, fade=fade_band)
-                _responsive_sleep(rotate_interval)
+                _sleep_pumping_toast(rotate_interval, screens, config)
                 continue
 
             if active and panel_kind:
@@ -1914,7 +1944,7 @@ def main():
                         photo_subs[t] = psub
                 if photo_subs:
                     _draw_overlays(photo_subs, config, fade=fade_band)
-                _responsive_sleep(rotate_interval)
+                _sleep_pumping_toast(rotate_interval, screens, config)
                 continue
 
             if active and stagger:
@@ -1925,12 +1955,12 @@ def main():
                 _render_one_screen(t0, s0, portrait_files, landscape_files,
                                    state, config, media_log, is_single, current_ts)
                 _draw_overlays({t0: s0}, config, fade=fade_band)
-                _responsive_sleep(max(0.5, rotate_interval / 2.0))
+                _sleep_pumping_toast(max(0.5, rotate_interval / 2.0), screens, config)
                 for t, s in photo_screens[1:]:
                     _render_one_screen(t, s, portrait_files, landscape_files,
                                        state, config, media_log, is_single, current_ts)
                 _draw_overlays(dict(photo_screens[1:]), config, fade=fade_band)
-                _responsive_sleep(max(0.5, rotate_interval / 2.0))
+                _sleep_pumping_toast(max(0.5, rotate_interval / 2.0), screens, config)
                 continue
 
             if active:
@@ -1939,7 +1969,7 @@ def main():
                                        state, config, media_log, is_single, current_ts)
 
             _draw_overlays(screens, config, fade=active and fade_band)
-            _responsive_sleep(rotate_interval)
+            _sleep_pumping_toast(rotate_interval, screens, config)
 
     except KeyboardInterrupt:
         print("\n[Selah] Interrupted - shutting down.")
