@@ -58,7 +58,12 @@ def _coords(config, cache):
     results = (r.json() or {}).get("results") or []
     if not results:
         return None, None
-    return float(results[0]["latitude"]), float(results[0]["longitude"])
+    top = results[0]
+    # Remember which place we actually resolved to — a wrong "Hamilton" is the
+    # easiest way for these numbers to look wrong (see precip_check.py).
+    cache["place"] = ", ".join(str(x) for x in
+                               (top.get("name"), top.get("admin1"), top.get("country")) if x)
+    return float(top["latitude"]), float(top["longitude"])
 
 
 def last_24h(config):
