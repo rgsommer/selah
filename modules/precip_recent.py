@@ -132,4 +132,5 @@ def summary_line(config):
         return f"Last 24h: {snow_cm:g} cm snow"
     if rain_mm >= 0.1:
         return f"Last 24h: {rain_mm:g} mm rain"
-    return "Last 24h: dry"
+    # Not "dry" — that reads as a humidity descriptor rather than rainfall.
+    return "Last 24h: no precipitation"
