@@ -62,3 +62,4 @@ recent_shown.json
 sender_aliases.json
 pending_approvals.json
 precip_cache.json
+memory_log.csv

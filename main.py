@@ -178,6 +178,58 @@ def _mark_shown(state, paths, config, total):
         _save_recent(state)
 
 
+MEMORY_LOG = "memory_log.csv"
+
+
+def _rss_mb():
+    """This process's resident memory in MB (Linux), or None elsewhere."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) // 1024
+    except Exception:
+        pass
+    return None
+
+
+def _mem_available_mb():
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+    except Exception:
+        pass
+    return None
+
+
+def _log_memory(config):
+    """Track memory use over time.
+
+    An OOM kill is a SIGKILL: the process dies instantly with no traceback and
+    no cleanup line, which is exactly the signature we're chasing. Logging the
+    trend lets us see growth leading up to a kill, since the kill itself can
+    never be caught.
+    """
+    rss = _rss_mb()
+    if rss is None:
+        return
+    avail = _mem_available_mb()
+    try:
+        fresh = not os.path.exists(MEMORY_LOG)
+        with open(MEMORY_LOG, "a") as f:
+            if fresh:
+                f.write("time,rss_mb,available_mb\n")
+            f.write(f"{datetime.datetime.now().isoformat(timespec='seconds')},"
+                    f"{rss},{avail if avail is not None else ''}\n")
+    except Exception:
+        pass
+    if rss > int(config.get("memory_warn_mb", 1200)):
+        log_error(f"High memory use: Selah is holding {rss} MB "
+                  f"(system available {avail} MB)")
+
+
 def _health_check(config):
     """Email the owner if disk space runs low (logger emails critical errors)."""
     import shutil
@@ -1315,6 +1367,7 @@ def main():
         last_media_refresh = 0
         last_drive_sync = 0
         last_health_check = 0
+        last_mem_check = 0
         last_awake_assert = 0
         health_check_interval = 3600  # disk check hourly
         email_check_interval = 60  # Check email every 60 seconds
@@ -1778,6 +1831,11 @@ def main():
                     except Exception as e:
                         log_error(f"Weekly digest check failed: {e}")
                 last_email_check = current_ts
+
+            # ---- MEMORY TRACE (every 5 min; an OOM kill leaves no traceback) ----
+            if current_ts - last_mem_check > 300:
+                _log_memory(config)
+                last_mem_check = current_ts
 
             # ---- HEALTH WATCHDOG (disk space, throttled) ----
             if config.get("health_watchdog_enabled", False) and current_ts - last_health_check > health_check_interval:
