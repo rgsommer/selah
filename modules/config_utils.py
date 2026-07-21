@@ -153,7 +153,8 @@ DEFAULT_CONFIG = {
     "boat_great_min_c": 22,
     "boat_great_max_wind_ms": 5,     # ~10 kt (calm)
     "boat_great_max_pop": 15,
-    "precip_24h_enabled": True,   # show measured last-24h rain/snow on the 5-day panel
+    "precip_24h_enabled": True,
+    "precip_use_stations": True,   # prefer real Environment Canada gauge data over model estimates   # show measured last-24h rain/snow on the 5-day panel
     "weather_lat": "",               # optional: skip geocoding for the 24h precip lookup
     "weather_lon": "",
     "weather_pill_enabled": True,

@@ -66,6 +66,19 @@ def main():
     print(f"coordinates       : {lat}, {lon}")
     print("   -> not your town? Set location or weather_lat/weather_lon in display_config.json\n")
 
+    # Real gauge observations (Environment Canada) — what the panel prefers.
+    try:
+        from modules.precip_recent import ec_last_24h
+        ec = ec_last_24h(lat, lon)
+        if ec:
+            precip, rain, code, dist = ec
+            print(f"STATION (measured): {precip} mm  (rain {rain} mm)"
+                  f"   station {code}, {dist} km away")
+        else:
+            print("STATION (measured): no Environment Canada gauge reported nearby")
+    except Exception as e:
+        print("STATION (measured): failed —", e)
+
     r = requests.get("https://api.open-meteo.com/v1/forecast", params={
         "latitude": lat, "longitude": lon,
         "hourly": "precipitation,rain,showers,snowfall",
