@@ -62,9 +62,14 @@ def main():
     if lat is None:
         print("Could not resolve a location — set weather_lat/weather_lon.")
         return
-    print(f"resolved place    : {cache.get('place', '(from cache/config)')}")
-    print(f"coordinates       : {lat}, {lon}")
-    print("   -> not your town? Set location or weather_lat/weather_lon in display_config.json\n")
+    pinned = cfg.get("weather_lat") not in (None, "") and cfg.get("weather_lon") not in (None, "")
+    if pinned:
+        print(f"coordinates       : {lat}, {lon}   (pinned — geocoding skipped)\n")
+    else:
+        print(f"resolved place    : {cache.get('place', '(cached)')}")
+        print(f"coordinates       : {lat}, {lon}")
+        print("   -> not your town? Set location or weather_lat/weather_lon "
+              "in display_config.json\n")
 
     # Real gauge observations (Environment Canada) — what the panel prefers.
     try:
