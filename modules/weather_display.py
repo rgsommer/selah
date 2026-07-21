@@ -656,6 +656,17 @@ def _render_forecast(screen, forecast, config):
         t_s = title_font.render("5-Day Forecast", True, (130, 205, 255))
         screen.blit(t_s, (px + 18, py + 14))
 
+        # Measured rain/snow over the last 24 hours, top-right of the panel.
+        try:
+            from modules.precip_recent import summary_line
+            p_txt = summary_line(config)
+        except Exception:
+            p_txt = ""
+        if p_txt:
+            p_s = small.render(p_txt, True, (150, 200, 240))
+            screen.blit(p_s, (px + panel_w - p_s.get_width() - 18,
+                              py + 14 + max(0, (title_font.get_linesize() - p_s.get_height()) // 2)))
+
         today = datetime.datetime.now().strftime("%a")
         top = py + 20 + title_font.get_linesize()
         icon_r = max(16, col_w // 6)

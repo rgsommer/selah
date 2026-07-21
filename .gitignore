@@ -61,3 +61,4 @@ recent_shown.json
 # Personal per-email name overrides (may contain real emails)
 sender_aliases.json
 pending_approvals.json
+precip_cache.json
