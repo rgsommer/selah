@@ -195,7 +195,7 @@ def _get_weather(config):
     if _last_weather_check and (now - _last_weather_check).seconds < 1800:
         return _cached_weather
 
-    weather = _fetch_openweathermap(api_key, location)
+    weather = _fetch_openweathermap(api_key, location, config)
     if weather:
         _cached_weather = weather
         _last_weather_check = now
@@ -214,12 +214,29 @@ def _get_weather(config):
     return _cached_weather
 
 
-def _fetch_openweathermap(api_key, location):
+def _owm_params(api_key, location, config, lat=None, lon=None):
+    """OpenWeather query params: exact coordinates when available (weather_lat/
+    weather_lon, or an explicit pair), else the configured place name. Coordinates
+    matter here — a spot 150 m higher than the city centre runs ~2C colder
+    overnight and noticeably windier."""
+    config = config or {}
+    if lat in (None, "") or lon in (None, ""):
+        lat, lon = config.get("weather_lat"), config.get("weather_lon")
+    if lat not in (None, "") and lon not in (None, ""):
+        try:
+            return {"lat": float(lat), "lon": float(lon),
+                    "appid": api_key, "units": "metric"}
+        except (TypeError, ValueError):
+            pass
+    return {"q": location, "appid": api_key, "units": "metric"}
+
+
+def _fetch_openweathermap(api_key, location, config=None):
     """Fetch current weather from OpenWeatherMap API."""
     try:
         import requests
         url = "https://api.openweathermap.org/data/2.5/weather"
-        params = {"q": location, "appid": api_key, "units": "metric"}
+        params = _owm_params(api_key, location, config)
         response = requests.get(url, params=params, timeout=10)
         if response.status_code == 200:
             data = response.json()
@@ -373,64 +390,98 @@ def _good_span(rec):
     return None, None
 
 
+def _forecast_days(params, config):
+    """Fetch the 3-hour forecast for `params` and aggregate it per date."""
+    import requests
+    url = "https://api.openweathermap.org/data/2.5/forecast"
+    r = requests.get(url, params=params, timeout=10)
+    if r.status_code != 200:
+        log_error(f"Forecast API returned {r.status_code}")
+        return None
+    days = {}
+    for entry in r.json().get("list", []):
+        dt = datetime.datetime.fromtimestamp(entry["dt"])
+        key = dt.date().isoformat()
+        t = entry["main"]["temp"]
+        main = entry["weather"][0]["main"]
+        desc = entry["weather"][0]["description"].title()
+        wnd = entry.get("wind") or {}
+        pop = float(entry.get("pop", 0) or 0)      # 0..1 chance of precipitation
+        wind = float(wnd.get("speed", 0) or 0)     # m/s
+        deg = wnd.get("deg")                       # direction wind blows FROM
+        rec = days.setdefault(key, {"hi": t, "lo": t, "conds": {}, "noon": None,
+                                    "pop": 0.0, "wind": None, "wind_deg": None,
+                                    "good_hours": [], "boat_hours": []})
+        rec["hi"] = max(rec["hi"], t)
+        rec["lo"] = min(rec["lo"], t)
+        rec["conds"][main] = rec["conds"].get(main, 0) + 1
+        if 6 <= dt.hour <= 21:                     # daytime max = the useful "chance of rain" / gustiness
+            rec["pop"] = max(rec["pop"], pop)
+            if rec["wind"] is None or wind > rec["wind"]:
+                rec["wind"] = wind                 # keep the direction of the strongest wind
+                rec["wind_deg"] = deg
+            if _interval_good(t, pop, main, config):
+                rec["good_hours"].append(dt.hour)
+            if _interval_boat(t, pop, wind, main, config):
+                rec["boat_hours"].append(dt.hour)
+        if 11 <= dt.hour <= 15:
+            rec["noon"] = desc
+    return days
+
+
 def _fetch_forecast(api_key, location, config=None):
     """OpenWeather 5-day/3-hour forecast aggregated to daily hi/lo/condition,
-    plus the daytime window that's good to be outdoors."""
+    plus the daytime window that's good to be outdoors.
+
+    Boating is judged at the water (boat_lat/boat_lon — e.g. Bayfront Park), not
+    at the house, since harbour wind is what actually matters for going out.
+    """
     config = config or {}
     try:
-        import requests
-        url = "https://api.openweathermap.org/data/2.5/forecast"
-        params = {"q": location, "appid": api_key, "units": "metric"}
-        r = requests.get(url, params=params, timeout=10)
-        if r.status_code != 200:
-            log_error(f"Forecast API returned {r.status_code}")
+        days = _forecast_days(_owm_params(api_key, location, config), config)
+        if days is None:
             return None
-        days = {}
-        for entry in r.json().get("list", []):
-            dt = datetime.datetime.fromtimestamp(entry["dt"])
-            key = dt.date().isoformat()
-            t = entry["main"]["temp"]
-            main = entry["weather"][0]["main"]
-            desc = entry["weather"][0]["description"].title()
-            wnd = entry.get("wind") or {}
-            pop = float(entry.get("pop", 0) or 0)      # 0..1 chance of precipitation
-            wind = float(wnd.get("speed", 0) or 0)     # m/s
-            deg = wnd.get("deg")                       # direction wind blows FROM
-            rec = days.setdefault(key, {"hi": t, "lo": t, "conds": {}, "noon": None,
-                                        "pop": 0.0, "wind": None, "wind_deg": None,
-                                        "good_hours": [], "boat_hours": []})
-            rec["hi"] = max(rec["hi"], t)
-            rec["lo"] = min(rec["lo"], t)
-            rec["conds"][main] = rec["conds"].get(main, 0) + 1
-            if 6 <= dt.hour <= 21:                     # daytime max = the useful "chance of rain" / gustiness
-                rec["pop"] = max(rec["pop"], pop)
-                if rec["wind"] is None or wind > rec["wind"]:
-                    rec["wind"] = wind                 # keep the direction of the strongest wind
-                    rec["wind_deg"] = deg
-                if _interval_good(t, pop, main, config):
-                    rec["good_hours"].append(dt.hour)
-                if _interval_boat(t, pop, wind, main, config):
-                    rec["boat_hours"].append(dt.hour)
-            if 11 <= dt.hour <= 15:
-                rec["noon"] = desc
-        out = []
-        for key in sorted(days)[:5]:
-            rec = days[key]
-            main = max(rec["conds"], key=rec["conds"].get) if rec["conds"] else ""
-            span, span_kind = _good_span(rec)
-            out.append({
-                "day": datetime.date.fromisoformat(key).strftime("%a"),
-                "hi": round(rec["hi"]), "lo": round(rec["lo"]),
-                "desc": rec["noon"] or main, "main": main,
-                "pop": round(rec["pop"] * 100),
-                "wind": (round(rec["wind"], 1) if rec["wind"] is not None else None),
-                "wind_deg": rec.get("wind_deg"),
-                "good_span": span, "good_span_kind": span_kind,
-            })
-        return out
+
+        # Second sample at the water for the boating verdict, when configured.
+        boat_days = {}
+        blat, blon = config.get("boat_lat"), config.get("boat_lon")
+        if (config.get("boating_hint", True)
+                and blat not in (None, "") and blon not in (None, "")):
+            try:
+                boat_days = _forecast_days(
+                    _owm_params(api_key, location, config, lat=blat, lon=blon),
+                    config) or {}
+            except Exception as e:
+                log_error(f"Boat-location forecast failed: {e}")
+
+        return _forecast_out(days, boat_days)
     except Exception as e:
         log_error(f"Forecast fetch failed: {e}")
         return None
+
+
+def _forecast_out(days, boat_days):
+    """Build the 5-day output, using the water's wind/hours for the boat verdict."""
+    out = []
+    for key in sorted(days)[:5]:
+        rec = days[key]
+        brec = boat_days.get(key) if boat_days else None
+        main = max(rec["conds"], key=rec["conds"].get) if rec["conds"] else ""
+        # The "good to be out" span should reflect boating hours at the water.
+        span_src = dict(rec, boat_hours=brec["boat_hours"]) if brec else rec
+        span, span_kind = _good_span(span_src)
+        bwind = brec["wind"] if brec and brec.get("wind") is not None else None
+        out.append({
+            "day": datetime.date.fromisoformat(key).strftime("%a"),
+            "hi": round(rec["hi"]), "lo": round(rec["lo"]),
+            "desc": rec["noon"] or main, "main": main,
+            "pop": round(rec["pop"] * 100),
+            "wind": (round(rec["wind"], 1) if rec["wind"] is not None else None),
+            "wind_deg": rec.get("wind_deg"),
+            "boat_wind": (round(bwind, 1) if bwind is not None else None),
+            "good_span": span, "good_span_kind": span_kind,
+        })
+    return out
 
 
 def _wrap(text, font, max_w):
@@ -534,7 +585,11 @@ def _boating_level(d, config):
     if not config.get("boating_hint", True):
         return 0
     hi = d.get("hi")
-    wind = d.get("wind")
+    # Prefer the wind measured at the water (boat_lat/boat_lon) — harbour wind
+    # is what decides whether you can go out, not wind at the house.
+    wind = d.get("boat_wind")
+    if wind is None:
+        wind = d.get("wind")
     if hi is None or wind is None:
         return 0
     main = (d.get("main") or "").lower()

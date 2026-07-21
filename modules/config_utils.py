@@ -147,6 +147,8 @@ DEFAULT_CONFIG = {
     "nice_day_max_c": 28,
     "nice_day_max_pop": 35,
     "boating_hint": True,            # boat badge on good boating days (needs wind data)
+    "boat_lat": "",                  # judge boating at the WATER (e.g. Bayfront Park), not the house
+    "boat_lon": "",
     "boat_good_min_c": 18,
     "boat_good_max_wind_ms": 8,      # ~15 kt
     "boat_good_max_pop": 30,
