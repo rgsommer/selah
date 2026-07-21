@@ -21,7 +21,23 @@ from modules.config_utils import load_config
 
 def main():
     cfg = load_config("display_config.json")
-    override = " ".join(a for a in sys.argv[1:] if not a.startswith("-")).strip()
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+
+    # Two numbers = exact coordinates, e.g.  python3 precip_check.py 43.32 -79.95
+    nums = []
+    for a in args:
+        try:
+            nums.append(float(a))
+        except ValueError:
+            nums = []
+            break
+    if len(nums) == 2:
+        cfg = dict(cfg)
+        cfg["weather_lat"], cfg["weather_lon"] = nums[0], nums[1]
+        print(f"(using coordinates {nums[0]}, {nums[1]} — ignoring configured location)\n")
+        args = []
+
+    override = " ".join(args).strip()
     if override:
         cfg = dict(cfg)
         cfg["location"] = override
