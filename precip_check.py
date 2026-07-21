@@ -113,8 +113,8 @@ def main():
             print(f"  {t}   {p:5.2f} mm  {'<-- counted' if inw else '(outside window)'}")
     print(f"\nLAST 24h TOTAL: {round(tot_r,1)} mm rain / {round(tot_s,1)} cm snow")
     try:
-        from modules.precip_recent import summary_line
-        print(f"panel would show: {summary_line(cfg)!r}")
+        from modules.precip_recent import last_24h, _format
+        print(f"panel would show: {_format(last_24h(cfg))!r}")
     except Exception as e:
         print("summary failed:", e)
 

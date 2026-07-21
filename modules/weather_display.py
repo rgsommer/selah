@@ -1,6 +1,7 @@
 """Weather display overlay using OpenWeatherMap API."""
 
 import datetime
+import threading
 import json
 import time
 import math
@@ -178,8 +179,34 @@ def _render_status_line(target, text, position, show_eyes=False):
         log_error(f"Status line render failed: {e}")
 
 
+# Network fetches must never run on the render loop — a blocking request stalls
+# drawing AND key handling. These getters return the cached value immediately and
+# refresh in a daemon thread when stale.
+_refresh_flags = {}
+_refresh_lock = threading.Lock()
+
+
+def _refresh_async(name, work):
+    """Run `work()` once in the background; ignore if already running."""
+    with _refresh_lock:
+        if _refresh_flags.get(name):
+            return
+        _refresh_flags[name] = True
+
+    def _run():
+        try:
+            work()
+        except Exception as e:
+            log_error(f"{name} refresh failed: {e}")
+        finally:
+            with _refresh_lock:
+                _refresh_flags[name] = False
+
+    threading.Thread(target=_run, daemon=True, name=f"selah-{name}").start()
+
+
 def _get_weather(config):
-    """Fetch weather data from OpenWeatherMap or local cache."""
+    """Current conditions; cached 30 min, refreshed off the render loop."""
     global _last_weather_check, _cached_weather
 
     if not config.get("weather_enabled", False):
@@ -189,28 +216,32 @@ def _get_weather(config):
     if not api_key or api_key == "your_openweathermap_api_key":
         return _cached_weather
 
-    location = config.get("location", "Hamilton,CA")
-
-    now = datetime.datetime.now()
-    if _last_weather_check and (now - _last_weather_check).seconds < 1800:
-        return _cached_weather
-
-    weather = _fetch_openweathermap(api_key, location, config)
-    if weather:
-        _cached_weather = weather
-        _last_weather_check = now
-        try:
-            with open("weather_cache.json", "w") as f:
-                json.dump(weather, f)
-        except Exception:
-            pass
-    elif not _cached_weather:
+    if _cached_weather is None:                 # seed from disk on first use
         try:
             with open("weather_cache.json", "r") as f:
                 _cached_weather = json.load(f)
         except Exception:
             pass
 
+    now = datetime.datetime.now()
+    if _last_weather_check and (now - _last_weather_check).total_seconds() < 1800:
+        return _cached_weather
+
+    location = config.get("location", "Hamilton,CA")
+
+    def _work():
+        global _last_weather_check, _cached_weather
+        weather = _fetch_openweathermap(api_key, location, config)
+        _last_weather_check = datetime.datetime.now()   # back off even on failure
+        if weather:
+            _cached_weather = weather
+            try:
+                with open("weather_cache.json", "w") as f:
+                    json.dump(weather, f)
+            except Exception:
+                pass
+
+    _refresh_async("weather", _work)
     return _cached_weather
 
 
@@ -303,32 +334,40 @@ def _get_second_summary(config):
 
 
 def _get_forecast(config):
-    """Daily 5-day forecast (list of {day, hi, lo, desc, main}); cached 1h."""
+    """Daily 5-day forecast; cached 1h, refreshed off the render loop."""
     global _cached_forecast, _last_forecast_check
     if not config.get("weather_enabled", False):
         return None
     api_key = config.get("weather_api_key", "")
     if not api_key or api_key == "your_openweathermap_api_key":
         return _cached_forecast
-    now = datetime.datetime.now()
-    if _last_forecast_check and (now - _last_forecast_check).seconds < 3600:
-        return _cached_forecast
 
-    fc = _fetch_forecast(api_key, config.get("location", "Hamilton,CA"), config)
-    if fc:
-        _cached_forecast = fc
-        _last_forecast_check = now
-        try:
-            with open("forecast_cache.json", "w") as f:
-                json.dump(fc, f)
-        except Exception:
-            pass
-    elif not _cached_forecast:
+    if _cached_forecast is None:                # seed from disk on first use
         try:
             with open("forecast_cache.json") as f:
                 _cached_forecast = json.load(f)
         except Exception:
             pass
+
+    now = datetime.datetime.now()
+    if _last_forecast_check and (now - _last_forecast_check).total_seconds() < 3600:
+        return _cached_forecast
+
+    location = config.get("location", "Hamilton,CA")
+
+    def _work():
+        global _cached_forecast, _last_forecast_check
+        fc = _fetch_forecast(api_key, location, config)
+        _last_forecast_check = datetime.datetime.now()  # back off even on failure
+        if fc:
+            _cached_forecast = fc
+            try:
+                with open("forecast_cache.json", "w") as f:
+                    json.dump(fc, f)
+            except Exception:
+                pass
+
+    _refresh_async("forecast", _work)
     return _cached_forecast
 
 

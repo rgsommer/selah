@@ -14,6 +14,7 @@ import json
 import time
 import math
 import re
+import threading
 import datetime
 
 from modules.logger import log_error
@@ -95,12 +96,12 @@ def ec_last_24h(lat, lon, radius_deg=0.3):
 
     per = {}        # station code -> {"coords":(lat,lon), "pcpn":{hour:mm}, "rnfl":{hour:mm}}
     offset = 0
-    for _ in range(12):                       # bounded pagination
+    for _ in range(8):                        # bounded pagination
         r = requests.get(_EC_OBS, params={
             "bbox": bbox, "datetime": window, "limit": 500, "offset": offset,
             "f": "json",
             "properties": "pcpn_amt_pst1hr,rnfl_amt_pst1hr,obs_date_tm",
-        }, timeout=30)
+        }, timeout=12)
         r.raise_for_status()
         data = r.json() or {}
         feats = data.get("features") or []
@@ -219,9 +220,60 @@ def last_24h(config):
         return cache.get("result") or None      # last known rather than nothing
 
 
+# --- non-blocking access for the render path -------------------------------
+# summary_line() runs inside _render_forecast, on the main loop. Fetching there
+# would stall rendering AND key handling for as long as the network takes, so it
+# only ever reads memory and kicks off a background refresh when stale.
+_mem = {"result": None, "ts": 0.0, "text": ""}
+_refreshing = False
+_lock = threading.Lock()
+
+
+def _refresh_async(config):
+    global _refreshing
+    with _lock:
+        if _refreshing:
+            return
+        _refreshing = True
+
+    def _work():
+        global _refreshing
+        try:
+            r = last_24h(config)
+            if r:
+                _mem["result"] = r
+                _mem["text"] = _format(r)
+            _mem["ts"] = time.time()        # back off even on failure
+        except Exception as e:
+            log_error(f"Background precipitation refresh failed: {e}")
+            _mem["ts"] = time.time()
+        finally:
+            with _lock:
+                _refreshing = False
+
+    threading.Thread(target=_work, daemon=True, name="selah-precip").start()
+
+
 def summary_line(config):
-    """Short label for the forecast panel, e.g. 'Last 24h: 6.3 mm rain'."""
-    r = last_24h(config)
+    """Short label for the forecast panel, e.g. 'Last 24h: 6.3 mm rain'.
+
+    Never blocks: returns the last known text and refreshes in the background.
+    """
+    if not config.get("precip_24h_enabled", True):
+        return ""
+    now = time.time()
+    if not _mem["ts"]:                       # first call — seed from disk cache
+        cached = (_load_cache() or {}).get("result")
+        if cached:
+            _mem["result"] = cached
+            _mem["text"] = _format(cached)
+    if now - _mem["ts"] > _TTL:
+        _refresh_async(config)
+    return _mem["text"]
+
+
+def _format(r):
+    """Short label for a last_24h() result."""
     if not r:
         return ""
     precip = r.get("precip_mm") or 0.0
