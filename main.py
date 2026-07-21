@@ -1071,6 +1071,24 @@ _INTERRUPT_EVENTS = (pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN,
                      pygame.FINGERDOWN)
 
 
+_last_safe_log = {}
+
+
+def _safe(label, fn, *args, **kwargs):
+    """Run a call that depends on the internet so an outage can never kill the
+    display. The Pi's connection is intermittent (DNS blips, drops), and a
+    photo frame must keep showing photos regardless. Failures are logged at most
+    once every 5 minutes per label so an outage can't spam the log."""
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        now = time.time()
+        if now - _last_safe_log.get(label, 0) > 300:
+            _last_safe_log[label] = now
+            log_error(f"{label} failed (continuing): {e}")
+        return None
+
+
 def _sleep_pumping_toast(seconds, screens, config):
     """Like _responsive_sleep, but animate/erase an on-screen toast while waiting
     so it fades out and clears after its 15s instead of sitting until the next
@@ -1644,7 +1662,7 @@ def main():
                 # Keep intake alive while dark so submissions still land.
                 if current_ts - last_email_check > email_check_interval:
                     try:
-                        check_for_new_emails(config, screens)
+                        _safe("email check", check_for_new_emails, config, screens)
                     except Exception:
                         pass
                     last_email_check = current_ts
@@ -1683,7 +1701,7 @@ def main():
 
                 if verse_now:
                     # Verse of the day at its scheduled night time, on its screen(s).
-                    show_verse_if_scheduled(screens, config)
+                    _safe("verse", show_verse_if_scheduled, screens, config)
                     time.sleep(3)
                 else:
                     # _draw_night powers off screens per night_off_mode and
@@ -1692,14 +1710,14 @@ def main():
                     _sweep_clocks(targets, config, 10)
                 # Still check email during night mode
                 if current_ts - last_email_check > email_check_interval:
-                    check_for_new_emails(config, screens)
+                    _safe("email check", check_for_new_emails, config, screens)
                     last_email_check = current_ts
                 # Keep pulling from Drive overnight (background; folds into the
                 # rotation when the display wakes in the morning).
                 if (config.get("cloud_backup_enabled", False)
                         and current_ts - last_drive_sync > drive_sync_interval
                         and not is_syncing()):
-                    start_background_sync(config)
+                    _safe("drive sync", start_background_sync, config)
                     last_drive_sync = current_ts
                 continue
 
@@ -1741,7 +1759,7 @@ def main():
 
             # ---- EMAIL CHECK (throttled) ----
             if current_ts - last_email_check > email_check_interval:
-                check_for_new_emails(config, screens)
+                _safe("email check", check_for_new_emails, config, screens)
                 # Check if annual invites need to go out (first week of January)
                 try:
                     send_annual_invites(config)
@@ -1784,7 +1802,7 @@ def main():
             if (config.get("cloud_backup_enabled", False)
                     and current_ts - last_drive_sync > drive_sync_interval
                     and not is_syncing()):
-                start_background_sync(config)
+                _safe("drive sync", start_background_sync, config)
                 last_drive_sync = current_ts
 
             drive_result = take_sync_result()
