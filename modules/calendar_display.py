@@ -2,13 +2,20 @@
 
 import datetime
 import json
+import os
+import threading
+import time
 import pygame
 from modules.logger import log_error
 
 _last_calendar_check = None
 _cached_events = []
 _last_fetch_ok = True
+_seeded = False
+_refreshing = False
+_refresh_lock = threading.Lock()
 
+CALENDAR_CACHE = "calendar_cache.json"
 _CAL_TTL = 600          # normal refresh cadence (seconds)
 _CAL_RETRY = 90         # retry sooner after a failed fetch
 
@@ -68,42 +75,87 @@ def show_calendar_if_scheduled(screens, config):
             _render_scrolling_calendar(screen, events, config)
 
 
-def _get_calendar_events(config):
-    """Fetch calendar events from Google Calendar API or local file.
+def _save_events(events):
+    """Persist the last good agenda so a restart with no internet still shows it."""
+    try:
+        with open(CALENDAR_CACHE, "w") as f:
+            json.dump({"saved": datetime.datetime.now().isoformat(),
+                       "events": events}, f, indent=2)
+    except Exception as e:
+        log_error(f"Failed to save calendar cache: {e}")
 
-    A failed fetch (DNS blip, token stumble, network not up yet after the
-    overnight screen-off) must NOT blank the agenda: we keep the last
-    known-good events and retry sooner, rather than caching an empty result
-    for the full TTL and claiming 'nothing scheduled'.
+
+def _load_events():
+    """Last saved agenda from disk, or [] if there isn't one."""
+    try:
+        with open(CALENDAR_CACHE) as f:
+            data = json.load(f)
+        evs = data.get("events")
+        return evs if isinstance(evs, list) else []
+    except Exception:
+        return []
+
+
+def _get_calendar_events(config):
+    """The agenda to display: last known events, refreshed in the background.
+
+    Never blocks the render loop, and never blanks. A failed fetch (internet
+    out, DNS blip, token stumble, network not up after the overnight
+    screen-off) keeps the previous events; those are saved to disk so they
+    survive a restart too, since an in-memory cache alone is empty on boot —
+    exactly when the internet is least likely to be up.
     """
-    global _last_calendar_check, _cached_events, _last_fetch_ok
+    global _last_calendar_check, _cached_events, _last_fetch_ok, _seeded, _refreshing
+
+    if not _seeded:                       # first call — restore what we saved
+        _seeded = True
+        if not _cached_events:
+            _cached_events = _load_events()
 
     now = datetime.datetime.now()
+    fresh = False
     if _last_calendar_check:
         # total_seconds(), not .seconds — the latter ignores whole days, so a
         # gap over 24h would look fresh and pin a stale cache.
         age = (now - _last_calendar_check).total_seconds()
-        if 0 <= age < (_CAL_TTL if _last_fetch_ok else _CAL_RETRY):
-            return _cached_events
+        fresh = 0 <= age < (_CAL_TTL if _last_fetch_ok else _CAL_RETRY)
+    if fresh:
+        return _cached_events
 
-    events = _try_google_calendar(config)       # None = fetch failed
-    if events is None:
-        local = _try_local_calendar() or []
-        _last_fetch_ok = False
-        if local:
-            events = local
-        elif _cached_events:
-            log_error("Calendar fetch failed — keeping last known events")
-            _last_calendar_check = now
-            return _cached_events
-        else:
-            events = []
-    else:
-        _last_fetch_ok = True
+    def _work():
+        global _last_calendar_check, _cached_events, _last_fetch_ok, _refreshing
+        try:
+            events = _try_google_calendar(config)      # None = fetch failed
+            if events is None:
+                local = _try_local_calendar() or []
+                _last_fetch_ok = False
+                if local:
+                    events = local
+                else:
+                    # Keep showing what we have rather than claiming an empty day.
+                    log_error("Calendar fetch failed — keeping last known events")
+                    _last_calendar_check = datetime.datetime.now()
+                    return
+            else:
+                _last_fetch_ok = True
+            _cached_events = events
+            _last_calendar_check = datetime.datetime.now()
+            if events:
+                _save_events(events)
+        except Exception as e:
+            # Internet out / API error must never take the display down.
+            log_error(f"Calendar refresh failed (keeping saved events): {e}")
+            _last_fetch_ok = False
+            _last_calendar_check = datetime.datetime.now()
+        finally:
+            with _refresh_lock:
+                _refreshing = False
 
-    _cached_events = events
-    _last_calendar_check = now
-    return events
+    with _refresh_lock:
+        if not _refreshing:
+            _refreshing = True
+            threading.Thread(target=_work, daemon=True, name="selah-calendar").start()
+    return _cached_events
 
 
 def _try_google_calendar(config):
