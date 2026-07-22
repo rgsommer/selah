@@ -49,6 +49,8 @@ DEFAULT_CONFIG = {
     "upload_qr_seconds": 20,
     "qr_upload_url": "",
     "qr_size_px": 230,               # on-demand (F11) QR size in px
+    "qr_corner_inches": 1.25,        # physical size of the periodic corner QR shown during the cycle
+    "display_dpi": 96,               # pixels per inch of the screen (calibrate if the inch size is off)
     "web_control_port": 5000,
     "coming_up_enabled": False,
     "coming_up_interval_minutes": 20,

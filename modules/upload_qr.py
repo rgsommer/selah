@@ -20,6 +20,7 @@ except Exception:
 
 _qr_surface = None
 _qr_url = None
+_qr_px = None
 
 
 def _local_ip():
@@ -41,10 +42,11 @@ def _upload_url(config):
     return f"http://{_local_ip()}:{port}/upload"
 
 
-def _build_qr(url, target_px=300):
+def _build_qr(url, target_px=300, min_scale=4):
     # Low error-correction = fewer modules = BIGGER modules at the same pixel
     # size, which scans far more reliably off a screen. border=4 is the standard
-    # white quiet zone (needed for the camera to lock on).
+    # white quiet zone (needed for the camera to lock on). min_scale floors the
+    # module size (px per cell); 3 still scans from close up for a small tile.
     qr = qrcode.QRCode(
         error_correction=qrcode.constants.ERROR_CORRECT_L,
         border=4, box_size=1)
@@ -52,7 +54,7 @@ def _build_qr(url, target_px=300):
     qr.make(fit=True)
     matrix = qr.get_matrix()
     n = len(matrix)
-    scale = max(4, target_px // max(1, n))
+    scale = max(min_scale, target_px // max(1, n))
     size = n * scale
     surf = pygame.Surface((size, size))
     surf.fill((255, 255, 255))
@@ -65,7 +67,7 @@ def _build_qr(url, target_px=300):
 
 def show_upload_qr_if_scheduled(screens, config):
     """Show the QR for a few seconds at the start of each interval window."""
-    global _qr_surface, _qr_url
+    global _qr_surface, _qr_url, _qr_px
     if not config.get("upload_qr_enabled", False) or not HAS_QR:
         return
 
@@ -74,11 +76,17 @@ def show_upload_qr_if_scheduled(screens, config):
     if (time.time() % interval) >= show_secs:
         return
 
+    # Size the corner QR physically: inches x display DPI. Calibrate display_dpi
+    # by measuring any known on-screen length if it isn't spot-on.
+    dpi = float(config.get("display_dpi", 96) or 96)
+    target_px = max(80, int(float(config.get("qr_corner_inches", 1.25)) * dpi))
+
     url = _upload_url(config)
-    if _qr_surface is None or url != _qr_url:
+    if _qr_surface is None or url != _qr_url or target_px != _qr_px:
         try:
-            _qr_surface = _build_qr(url)
+            _qr_surface = _build_qr(url, target_px=target_px, min_scale=3)
             _qr_url = url
+            _qr_px = target_px
         except Exception as e:
             log_error(f"QR build failed: {e}")
             return
@@ -168,12 +176,14 @@ def _render_qr(screen, qr_surf):
     try:
         w, h = screen.get_size()
         qs = qr_surf.get_width()
-        pad = 16
-        font = pygame.font.Font(None, max(20, w // 52))
+        # Scale the caption/padding to the QR so a small (1.25") code stays a
+        # small tile instead of a wide label with a tiny code under it.
+        pad = max(6, qs // 12)
+        font = pygame.font.Font(None, max(14, qs // 6))
         label = font.render("Scan to send photos", True, (255, 255, 255))
 
         box_w = max(qs, label.get_width()) + pad * 2
-        box_h = qs + label.get_height() + pad * 2 + 6
+        box_h = qs + label.get_height() + pad + 6
         bx, by = w - box_w - 20, h - box_h - 20
 
         bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
