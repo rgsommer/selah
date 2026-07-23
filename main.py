@@ -744,21 +744,29 @@ def _render_screen(screen, screen_type, files, state, config, media_log, multi_f
     state[screen_type]["index"] = (idx + 1) % len(files)
 
 
+_MORPH_MODES = ("tile3", "tile6", "cascade", "split")
+
+
 def _arm_collage_morph(screen, screen_type, state, config, mode, picks, pool):
-    """After a grid collage is shown, plan a slow morph: hold the whole picture
-    for half collage_duration, then swap ONE cell every collage_swap_interval
-    seconds in random cell order, extending so the last new photo shows at least
-    collage_final_hold seconds. Grid layouts only (tile3/tile6) — their cells
-    don't overlap, so a cell can be replaced cleanly."""
+    """After ANY multi-photo layout is shown, plan a slow morph: hold the whole
+    picture for half collage_duration, then swap ONE photo every
+    collage_swap_interval seconds in random order, extending so the last new
+    photo shows at least collage_final_hold seconds.
+
+    Grids swap the single cell in place; cascade/split rebuild the frame with
+    that one photo replaced and present it without a transition, so only the
+    changed photo differs on screen. `picks` is the live frame list, so mutating
+    it keeps the browsable history in sync."""
     if not config.get("collage_morph_enabled", True):
         return
-    if mode not in ("tile3", "tile6") or len(picks) < 2:
+    if mode not in _MORPH_MODES or len(picks) < 2:
         return
     w, h = screen.get_size()
     portrait = h > w
+    cols = rows = None
     if mode == "tile3":
         cols, rows = (1, 3) if portrait else (3, 1)
-    else:
+    elif mode == "tile6":
         cols, rows = (2, 3) if portrait else (3, 2)
 
     n = len(picks)
@@ -775,7 +783,8 @@ def _arm_collage_morph(screen, screen_type, state, config, mode, picks, pool):
     now = time.time()
     sd = state.setdefault(screen_type, {"index": 0, "paused_until": 0})
     sd["morph"] = {
-        "cols": cols, "rows": rows,
+        "mode": mode, "cols": cols, "rows": rows,
+        "picks": picks,                      # the live frame list (history-linked)
         "order": order, "k": 0,
         "swap_due": now + dur / 2.0,        # first swap at the halfway point
         "swap_iv": swap_iv, "final_hold": final_hold,
@@ -808,9 +817,18 @@ def _service_collage_morph(screen, screen_type, state, config):
                 new_path = cand
                 break
         if new_path:
-            from modules.display_handler import swap_grid_cell
-            if swap_grid_cell(screen, m["cols"], m["rows"], config, cell, new_path):
-                _mark_shown(state, [new_path], config, 10000)
+            from modules.display_handler import swap_grid_cell, show_layout
+            picks = m["picks"]
+            picks[cell] = new_path            # keeps the browsable frame in sync
+            if m["mode"] in ("tile3", "tile6"):
+                # Grid: repaint just the one cell (no effect re-roll on the rest).
+                swap_grid_cell(screen, m["cols"], m["rows"], config, cell, new_path)
+            else:
+                # Cascade/split overlap, so rebuild the frame with the one photo
+                # replaced and present it with NO transition — unchanged photos
+                # redraw identically, so only the swapped one appears to change.
+                show_layout(screen, picks, config, m["mode"], fade=False)
+            _mark_shown(state, [new_path], config, 10000)
 
         m["k"] += 1
         m["swap_due"] += m["swap_iv"]
