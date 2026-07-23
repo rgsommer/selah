@@ -649,7 +649,8 @@ def _nav_history(screen, screen_type, files, state, config, media_log, direction
             _render_screen(screen, screen_type, files, state, config, media_log)
 
 
-def _render_screen(screen, screen_type, files, state, config, media_log, multi_files=None):
+def _render_screen(screen, screen_type, files, state, config, media_log, multi_files=None,
+                   allow_morph=True):
     """Render the next slideshow frame for one screen, with random layout variety,
     recording it so the arrows can browse back/forward through full renders.
 
@@ -733,6 +734,8 @@ def _render_screen(screen, screen_type, files, state, config, media_log, multi_f
         _push_history(state, screen_type, frame)
         _render_frame(screen, frame, config, media_log)
         _mark_shown(state, picks, config, len(pool))
+        if allow_morph:
+            _arm_collage_morph(screen, screen_type, state, config, mode, picks, pool)
     else:                                   # not enough — fall back to single
         frame = {"mode": "single", "picks": [first], "caption": None}
         _push_history(state, screen_type, frame)
@@ -741,8 +744,86 @@ def _render_screen(screen, screen_type, files, state, config, media_log, multi_f
     state[screen_type]["index"] = (idx + 1) % len(files)
 
 
+def _arm_collage_morph(screen, screen_type, state, config, mode, picks, pool):
+    """After a grid collage is shown, plan a slow morph: hold the whole picture
+    for half collage_duration, then swap ONE cell every collage_swap_interval
+    seconds in random cell order, extending so the last new photo shows at least
+    collage_final_hold seconds. Grid layouts only (tile3/tile6) — their cells
+    don't overlap, so a cell can be replaced cleanly."""
+    if not config.get("collage_morph_enabled", True):
+        return
+    if mode not in ("tile3", "tile6") or len(picks) < 2:
+        return
+    w, h = screen.get_size()
+    portrait = h > w
+    if mode == "tile3":
+        cols, rows = (1, 3) if portrait else (3, 1)
+    else:
+        cols, rows = (2, 3) if portrait else (3, 2)
+
+    n = len(picks)
+    order = list(range(n))
+    shuffle(order)
+    dur = float(config.get("collage_duration", 90) or 90)
+    swap_iv = max(1.0, float(config.get("collage_swap_interval", 10) or 10))
+    final_hold = float(config.get("collage_final_hold", 30) or 30)
+
+    shown = set(picks)
+    reps = [f for f in pool if f not in shown and not f.lower().endswith(VIDEO_EXTS)]
+    shuffle(reps)
+
+    now = time.time()
+    sd = state.setdefault(screen_type, {"index": 0, "paused_until": 0})
+    sd["morph"] = {
+        "cols": cols, "rows": rows,
+        "order": order, "k": 0,
+        "swap_due": now + dur / 2.0,        # first swap at the halfway point
+        "swap_iv": swap_iv, "final_hold": final_hold,
+        "reps": reps, "end": None,
+    }
+    # The morph owns this screen's timeline until it finishes.
+    sd["next_advance"] = now + dur + n * swap_iv + final_hold
+
+
+def _service_collage_morph(screen, screen_type, state, config):
+    """Advance an active morph: do at most one due cell-swap per call (so a pause
+    can't fire a burst), and report True once every swap has shown its final
+    hold. Wrapped so a bad photo can never crash the loop."""
+    sd = state.get(screen_type) or {}
+    m = sd.get("morph")
+    if not m:
+        return True
+    now = time.time()
+    try:
+        if m["k"] >= len(m["order"]):           # all swapped — wait out final hold
+            return m["end"] is not None and now >= m["end"]
+        if now < m["swap_due"]:
+            return False
+
+        cell = m["order"][m["k"]]
+        new_path = None
+        while m["reps"]:
+            cand = m["reps"].pop()
+            if os.path.exists(cand):
+                new_path = cand
+                break
+        if new_path:
+            from modules.display_handler import swap_grid_cell
+            if swap_grid_cell(screen, m["cols"], m["rows"], config, cell, new_path):
+                _mark_shown(state, [new_path], config, 10000)
+
+        m["k"] += 1
+        m["swap_due"] += m["swap_iv"]
+        if m["k"] >= len(m["order"]):
+            m["end"] = now + m["final_hold"]
+    except Exception as e:
+        log_error(f"Collage morph failed: {e}")
+        return True                             # give up cleanly, resume rotation
+    return False
+
+
 def _render_one_screen(screen_type, screen, portrait_files, landscape_files,
-                       state, config, media_log, is_single, current_ts):
+                       state, config, media_log, is_single, current_ts, allow_morph=True):
     """Render one photo screen (placeholder if it has no media). Honors pause."""
     if current_ts < state.get(screen_type, {}).get("paused_until", 0):
         return
@@ -770,7 +851,8 @@ def _render_one_screen(screen_type, screen, portrait_files, landscape_files,
         except Exception:
             pass
         return
-    _render_screen(screen, screen_type, files, state, config, media_log, multi_files)
+    _render_screen(screen, screen_type, files, state, config, media_log, multi_files,
+                   allow_morph=allow_morph)
 
 
 def _fade_in_layer(screen, bg, layer, seconds):
@@ -1221,7 +1303,7 @@ def _render_screen_with_panel(screen_type, screen, portrait_files, landscape_fil
     except Exception as e:
         log_error(f"Panel split failed: {e}")
         _render_one_screen(screen_type, screen, portrait_files, landscape_files,
-                           state, config, media_log, is_single, current_ts)
+                           state, config, media_log, is_single, current_ts, allow_morph=False)
         return None
     # Draw the panel first so it's already up while the photo half animates in;
     # the photo render only touches its own half, so the panel stays put.
@@ -1235,7 +1317,7 @@ def _render_screen_with_panel(screen_type, screen, portrait_files, landscape_fil
     except Exception as e:
         log_error(f"Info panel render failed: {e}")
     _render_one_screen(screen_type, photo_sub, portrait_files, landscape_files,
-                       state, config, media_log, is_single, current_ts)
+                       state, config, media_log, is_single, current_ts, allow_morph=False)
     return photo_sub
 
 
@@ -1679,7 +1761,10 @@ def main():
                     if _stype.startswith("portrait") or _stype.startswith("landscape"):
                         _files = portrait_files if _stype.startswith("portrait") else landscape_files
                         _nav_history(_screen, _stype, _files, state, config, media_log, _dir)
-                        state.setdefault(_stype, {})["paused_until"] = current_ts + pause_for
+                        sd = state.setdefault(_stype, {})
+                        sd["paused_until"] = current_ts + pause_for
+                        sd["morph"] = None                 # manual browse ends the morph
+                        sd["next_advance"] = current_ts + pause_for
 
             # ---- MANUAL BLACKOUT (F9): displays to standby for a set time ----
             # Uses DPMS (layout-safe) — never touches the xrandr arrangement, so
@@ -1998,7 +2083,7 @@ def main():
                     else:                                # photos left, sunrise right
                         _blit_image_fill(right, sunrise_img, sun_label)
                         _render_one_screen(t, left, portrait_files, landscape_files,
-                                           state, config, media_log, is_single, current_ts)
+                                           state, config, media_log, is_single, current_ts, allow_morph=False)
                         photo_subs[t] = left
                 try:
                     pygame.display.flip()
@@ -2029,23 +2114,43 @@ def main():
                 # are drawn per group (on a fresh photo) to avoid darkening.
                 t0, s0 = photo_screens[0]
                 _render_one_screen(t0, s0, portrait_files, landscape_files,
-                                   state, config, media_log, is_single, current_ts)
+                                   state, config, media_log, is_single, current_ts, allow_morph=False)
                 _draw_overlays({t0: s0}, config, fade=fade_band)
                 _sleep_pumping_toast(max(0.5, rotate_interval / 2.0), screens, config)
                 for t, s in photo_screens[1:]:
                     _render_one_screen(t, s, portrait_files, landscape_files,
-                                       state, config, media_log, is_single, current_ts)
+                                       state, config, media_log, is_single, current_ts, allow_morph=False)
                 _draw_overlays(dict(photo_screens[1:]), config, fade=fade_band)
                 _sleep_pumping_toast(max(0.5, rotate_interval / 2.0), screens, config)
                 continue
 
+            morphing = False
             if active:
                 for t, s in photo_screens:
-                    _render_one_screen(t, s, portrait_files, landscape_files,
-                                       state, config, media_log, is_single, current_ts)
+                    sd = state.setdefault(t, {"index": 0, "paused_until": 0})
+                    if current_ts < sd.get("paused_until", 0):
+                        continue
+                    # A collage in mid-morph owns its screen's timeline: swap a
+                    # cell if one is due, and don't advance until it's finished.
+                    if sd.get("morph"):
+                        if _service_collage_morph(s, t, state, config):
+                            sd["morph"] = None
+                            sd["next_advance"] = 0        # advance now
+                        else:
+                            morphing = True
+                            continue
+                    if current_ts >= sd.get("next_advance", 0):
+                        _render_one_screen(t, s, portrait_files, landscape_files,
+                                           state, config, media_log, is_single, current_ts)
+                        if sd.get("morph"):
+                            morphing = True                # fresh collage armed a morph
+                        else:
+                            sd["next_advance"] = current_ts + rotate_interval
 
             _draw_overlays(screens, config, fade=active and fade_band)
-            _sleep_pumping_toast(rotate_interval, screens, config)
+            # Wake ~once a second while morphing so swaps fire near their time;
+            # per-screen next_advance keeps non-morphing screens on their interval.
+            _sleep_pumping_toast(1.0 if morphing else rotate_interval, screens, config)
 
     except KeyboardInterrupt:
         print("\n[Selah] Interrupted - shutting down.")

@@ -21,6 +21,10 @@ DEFAULT_CONFIG = {
     "feature_opposite_orientation": False,  # F8: True = portraits on the landscape screen
     "layout_fade_enabled": True,
     "transition_style": "random",
+    "collage_morph_enabled": True,   # multi-photo grids morph: swap cells one at a time after half the time
+    "collage_duration": 90,          # seconds; swapping begins at half this
+    "collage_swap_interval": 10,     # seconds between single-cell swaps
+    "collage_final_hold": 30,        # the last swapped photo shows at least this long
     "layout_weights": {"single": 50, "split": 20, "cascade": 20, "tile3": 30, "tile6": 20},
     "multi_gutter_px": 0,
     "cascade_size": 0.5,

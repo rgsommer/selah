@@ -97,6 +97,48 @@ def set_photo_rects(screen, rects):
     _last_photo_rects[id(screen)] = rects
 
 
+def grid_cell_geometry(screen, cols, rows, config):
+    """The (gap, cell_w, cell_h) for a cols x rows grid — same math as
+    _build_grid_frame, so a single cell can be recomputed and swapped in place."""
+    w, h = screen.get_size()
+    gap = _gutter_px(config, w)
+    cell_w = (w - gap * (cols + 1)) // cols
+    cell_h = (h - gap * (rows + 1)) // rows
+    return gap, cell_w, cell_h
+
+
+def swap_grid_cell(screen, cols, rows, config, index, new_path):
+    """Replace a single collage cell in place with `new_path`, without redrawing
+    the rest of the grid. Keeps the delete/number-picker rects in sync. Returns
+    True if the cell was redrawn."""
+    try:
+        gap, cell_w, cell_h = grid_cell_geometry(screen, cols, rows, config)
+        r, c = index // cols, index % cols
+        cx = gap + c * (cell_w + gap)
+        cy = gap + r * (cell_h + gap)
+        img = _scaled_image(new_path, cell_w, cell_h)
+        if not img:
+            return False
+        img = _maybe_effect(img, config, new_path)
+        iw, ih = img.get_size()
+        ox, oy = cx + (cell_w - iw) // 2, cy + (cell_h - ih) // 2
+        # Black the whole cell first (new photo may have a different aspect), then
+        # blit the fitted image centred.
+        screen.fill((0, 0, 0), pygame.Rect(cx, cy, cell_w, cell_h))
+        screen.blit(img, (ox, oy))
+        try:
+            pygame.display.flip()
+        except Exception:
+            pass
+        rects = _last_photo_rects.get(id(screen))
+        if isinstance(rects, list) and 0 <= index < len(rects):
+            rects[index] = (new_path, pygame.Rect(ox, oy, iw, ih))
+        return True
+    except Exception as e:
+        log_error(f"swap_grid_cell failed: {e}")
+        return False
+
+
 def _detect_monitors():
     """Detect connected monitors via xrandr. Returns list of dicts with name, w, h, x, y.
 
