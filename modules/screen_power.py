@@ -93,6 +93,16 @@ def prevent_sleep():
     _run("xset -dpms")        # no DPMS power-down (sleep)
 
 
+def keep_display_awake():
+    """Daytime safety net: force any DPMS-blanked monitor back on and re-disable
+    DPMS, regardless of the tracked on/off state. Harmless when already awake —
+    'force on' is a no-op on a live display. Recovers the occasional black screen
+    caused by the OS idle-timer blanking despite us thinking the screen is on."""
+    _run("xset dpms force on")
+    _state["off"] = False
+    prevent_sleep()
+
+
 def screen_off():
     """Put the monitors into standby via DPMS. Layout-safe (does NOT touch the
     xrandr arrangement, so it can never mirror the outputs). Idempotent."""
@@ -113,4 +123,8 @@ def screen_on():
     _run("xset dpms force on")
     _run("vcgencmd display_power 1")
     _state["off"] = False
+    # screen_off() re-enabled DPMS so 'force off' would work; leaving it enabled
+    # lets the OS idle-timer blank the monitor on its own minutes later (an
+    # occasional black screen with no crash). Re-disable it now that we're awake.
+    prevent_sleep()
     print("[Selah] Displays woken (DPMS)")

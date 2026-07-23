@@ -1945,14 +1945,15 @@ def main():
                 _health_check(config)
                 last_health_check = current_ts
 
-            # ---- KEEP-AWAKE (re-assert no-blank/no-DPMS, throttled) ----
-            # Some environments reset xset settings; re-apply periodically, but
-            # not while the screen is intentionally blanked for night mode.
-            if config.get("prevent_screen_sleep", True) and current_ts - last_awake_assert > 240:
+            # ---- KEEP-AWAKE (daytime black-screen recovery, throttled) ----
+            # We only reach here in daytime (night + blackout branches continue
+            # earlier), so the display should always be ON: force any DPMS-blanked
+            # monitor back on and re-disable DPMS. Recovers an occasional black
+            # screen within a minute regardless of what blanked it.
+            if config.get("prevent_screen_sleep", True) and current_ts - last_awake_assert > 60:
                 try:
-                    from modules.screen_power import prevent_sleep, is_off
-                    if not is_off():
-                        prevent_sleep()
+                    from modules.screen_power import keep_display_awake
+                    keep_display_awake()
                 except Exception:
                     pass
                 last_awake_assert = current_ts
