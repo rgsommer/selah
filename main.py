@@ -1407,8 +1407,47 @@ def _draw_overlays(screens, config, fade=False):
         log_error(f"Overlay draw failed: {e}")
 
 
+def _log_restart():
+    """Record each startup with the system's boot id and uptime, so we can tell
+    a REBOOT (boot id changes, uptime resets) from a session/process crash (same
+    boot id, uptime keeps climbing) — the exact question behind the repeated
+    'starting' lines with no 'exited' line. Written to restart_log.csv."""
+    try:
+        boot_id = ""
+        try:
+            with open("/proc/sys/kernel/random/boot_id") as f:
+                boot_id = f.read().strip()
+        except Exception:
+            pass
+        up = ""
+        try:
+            with open("/proc/uptime") as f:
+                up = f"{float(f.read().split()[0]):.0f}"
+        except Exception:
+            pass
+        prev_boot = ""
+        try:
+            with open("restart_log.csv") as f:
+                rows = f.read().strip().splitlines()
+            if len(rows) > 1:
+                prev_boot = rows[-1].split(",")[1]
+        except Exception:
+            pass
+        kind = "reboot" if (boot_id and boot_id != prev_boot) else "session-restart"
+        fresh = not os.path.exists("restart_log.csv")
+        with open("restart_log.csv", "a") as f:
+            if fresh:
+                f.write("time,boot_id,uptime_s,kind\n")
+            f.write(f"{datetime.datetime.now().isoformat(timespec='seconds')},"
+                    f"{boot_id},{up},{kind}\n")
+        print(f"[Selah] Startup: {kind} (system up {up}s)")
+    except Exception:
+        pass
+
+
 def main():
     print("[Selah] Starting display system...")
+    _log_restart()
     config = load_config("display_config.json")
 
     # Apply timezone first so all scheduling (day/night, agenda, special days)
