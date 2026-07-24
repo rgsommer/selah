@@ -230,9 +230,49 @@ def _log_memory(config):
                   f"(system available {avail} MB)")
 
 
+_power_warned = {"under": False, "throttle": False, "thermal": False}
+
+
+def _power_health(config):
+    """Detect undervoltage / throttling via `vcgencmd get_throttled` and log it.
+
+    A sudden reboot with NO Python traceback and no run.sh 'exited' line is the
+    signature of a full power loss — usually an inadequate Pi power supply
+    browning out under dual-HDMI load. The Pi records this in a bitmask; surface
+    it in our own log/email so the invisible hardware cause becomes visible.
+    Bits: 0x1 under-voltage now, 0x10000 under-voltage since boot; 0x4/0x40000
+    throttled; 0x8/0x80000 soft-temp limit."""
+    try:
+        import subprocess
+        out = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True,
+                              text=True, timeout=5).stdout.strip()
+        val = int(out.split("=")[1], 16) if "=" in out else 0
+    except Exception:
+        return
+    checks = [
+        ("under", val & 0x1, val & 0x10000,
+         "UNDERVOLTAGE — the Pi's power supply is inadequate under load; this "
+         "causes the spontaneous reboots. Use an official 5.1V/3A+ USB-C supply "
+         "and don't power peripherals from the Pi."),
+        ("throttle", val & 0x4, val & 0x40000,
+         "CPU THROTTLED (power/heat) — same root cause as undervoltage."),
+        ("thermal", val & 0x8, val & 0x80000,
+         "OVER-TEMPERATURE — add cooling/airflow; sustained heat forces reboots."),
+    ]
+    for key, now_bit, ever_bit, msg in checks:
+        if now_bit or ever_bit:
+            if not _power_warned[key]:                # email once per run, then quiet
+                _power_warned[key] = True
+                log_error(f"{msg}  (get_throttled={out})",
+                          critical=bool(now_bit), config=config)
+        else:
+            _power_warned[key] = False
+
+
 def _health_check(config):
     """Email the owner if disk space runs low (logger emails critical errors)."""
     import shutil
+    _power_health(config)
     try:
         total, _used, free = shutil.disk_usage(config.get("media_folder", "."))
         pct_free = free * 100 // max(1, total)
@@ -1935,9 +1975,11 @@ def main():
                         log_error(f"Weekly digest check failed: {e}")
                 last_email_check = current_ts
 
-            # ---- MEMORY TRACE (every 5 min; an OOM kill leaves no traceback) ----
+            # ---- MEMORY + POWER TRACE (every 5 min; a kill/reboot leaves no
+            # traceback, so sample the trend and flag undervoltage/throttling) ----
             if current_ts - last_mem_check > 300:
                 _log_memory(config)
+                _power_health(config)
                 last_mem_check = current_ts
 
             # ---- HEALTH WATCHDOG (disk space, throttled) ----
