@@ -23,14 +23,19 @@ _GENERIC_NAME_RE = re.compile(
     r"whatsapp|signal[-_]|untitled|scan[-_ ]?\d|\d{6,}|[0-9a-f]{12,}$)",
     re.I)
 
+# Generic camera codes: an all-UPPERCASE 1-4 letter prefix followed by 4+ digits
+# — P4928937, PB150001, P1010010, HPIM0079, IM003658. Case-sensitive on purpose,
+# so Title-case names with a year (Laura2018, Anne2007, Mt Wilhelm 2007) are kept.
+_CAMERA_CODE_RE = re.compile(r"^[A-Z]{1,4}[-_ ]?\d{4,}")
+
 
 def _is_generic_filename(stem):
     """True if a filename stem looks auto-generated (IMG_1234, photo-1, PXL_...,
-    Screenshot, all-digits, hex blob) rather than a meaningful caption."""
+    Screenshot, P4928937, all-digits, hex blob) rather than a meaningful caption."""
     stem = (stem or "").strip()
     if not stem:
         return True
-    return bool(_GENERIC_NAME_RE.match(stem))
+    return bool(_GENERIC_NAME_RE.match(stem) or _CAMERA_CODE_RE.match(stem))
 
 
 _photo_date_cache = {}
