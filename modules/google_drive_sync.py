@@ -240,7 +240,34 @@ def pull_from_drive(config, screens=None):
     if new_files:
         src = "1 folder" if len(folder_ids) == 1 else f"{len(folder_ids)} folders"
         print(f"[Drive Sync] Downloaded {len(new_files)} new file(s) from {src}.")
+        _feature_new_drive(new_files, config)
     return new_files
+
+
+def _feature_new_drive(paths, config):
+    """Log freshly downloaded Drive files to media_log.json (timestamp = now) so
+    the 'feature recent' scattering shows them as new, exactly like email/QR
+    uploads. sender is left blank so they get no '— from' caption and no
+    leaderboard credit.
+
+    Guarded: a sync that pulls more than feature_drive_new_max files is treated
+    as a bulk archive import (e.g. the first sync of an existing folder) and just
+    folds into rotation instead of flooding the 'new' queue with the whole album.
+    """
+    if not config.get("feature_drive_new", True):
+        return
+    cap = int(config.get("feature_drive_new_max", 300) or 0)
+    if cap and len(paths) > cap:
+        print(f"[Drive Sync] {len(paths)} files — bulk import, folding into "
+              f"rotation (not featured as new).")
+        return
+    try:
+        from modules.email_handler import log_media
+        for p in paths:
+            log_media(p, "", None, None)     # blank sender: no submitter, no leaderboard
+        print(f"[Drive Sync] Featuring {len(paths)} freshly downloaded pic(s) as new.")
+    except Exception as e:
+        log_error(f"Failed to feature new Drive media: {e}", config=config)
 
 
 def _pull_one_folder(service, folder_id, config, downloaded, new_files,

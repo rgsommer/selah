@@ -136,6 +136,8 @@ DEFAULT_CONFIG = {
     "drive_pull_dir": "media/shared_drive",
     "drive_pull_skip_dirs": ["display"],
     "shared_drive_granular": True,
+    "feature_drive_new": True,        # freshly downloaded Drive pics are featured as new (like email/QR)
+    "feature_drive_new_max": 300,    # a sync bigger than this is a bulk import: just fold in, don't feature
     "drive_push_dirs": [],
     "family_folder_enabled": False,
     "family_folder_id": "",
