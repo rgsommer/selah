@@ -244,6 +244,33 @@ def pull_from_drive(config, screens=None):
     return new_files
 
 
+def _stamp_capture_date(path, file_info):
+    """Set a downloaded file's mtime to when the photo was actually TAKEN, so the
+    on-screen date shows the picture date, not the download date. Downloading
+    resets mtime to 'now'; Drive exposes the real capture time in
+    imageMediaMetadata.time (parsed from EXIF), falling back to createdTime.
+    Photos that also carry EXIF are read directly by the display anyway — this
+    fixes the ones whose date would otherwise default to the download time."""
+    ts = None
+    meta = (file_info.get("imageMediaMetadata") or {}).get("time")
+    if meta:
+        try:
+            ts = datetime.datetime.strptime(str(meta)[:19], "%Y:%m:%d %H:%M:%S").timestamp()
+        except Exception:
+            ts = None
+    if ts is None and file_info.get("createdTime"):
+        try:
+            ts = datetime.datetime.fromisoformat(
+                str(file_info["createdTime"]).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            ts = None
+    if ts:
+        try:
+            os.utime(path, (ts, ts))
+        except Exception:
+            pass
+
+
 def _feature_new_drive(paths, config):
     """Log freshly downloaded Drive files to media_log.json (timestamp = now) so
     the 'feature recent' scattering shows them as new, exactly like email/QR
@@ -286,7 +313,8 @@ def _pull_one_folder(service, folder_id, config, downloaded, new_files,
         response = service.files().list(
             q=f"'{folder_id}' in parents and trashed=false",
             spaces="drive",
-            fields="nextPageToken, files(id, name, mimeType)",
+            fields=("nextPageToken, files(id, name, mimeType, createdTime, "
+                    "imageMediaMetadata/time)"),
             pageToken=page_token,
             pageSize=100,
         ).execute()
@@ -345,6 +373,7 @@ def _pull_one_folder(service, folder_id, config, downloaded, new_files,
                     "downloaded_at": datetime.datetime.now().isoformat(),
                 }
                 _maybe_downscale(dest_path, config)
+                _stamp_capture_date(dest_path, file_info)   # date = when TAKEN, not downloaded
                 new_files.append(str(dest_path))
                 print(f"[Drive Sync] Downloaded: {os.path.join(subpath, file_name)}")
             except Exception as e:

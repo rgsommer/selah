@@ -1840,6 +1840,10 @@ def main():
                         target = screens.get("landscape") or screens.get("portrait")
                         if target:
                             show_help(target, config)
+                        # Esc/any key closes help — repaint so it actually clears
+                        # instead of lingering until the next rotation.
+                        _clear_screens(screens)
+                        _redraw_current(screens, state, config, media_log)
                     elif event.key == pygame.K_SPACE:
                         # Play / pause the slideshow.
                         state["paused"] = not state.get("paused", False)
