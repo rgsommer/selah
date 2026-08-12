@@ -40,6 +40,7 @@ DEFAULT_CONFIG = {
     "photo_effect_bw": True,
     "recent_memory_enabled": True,
     "recent_memory": 0,
+    "media_refresh_seconds": 300,    # how often to re-scan the library from disk (higher = less SD I/O)
     "balanced_rotation": True,
     "screen_rotation_sync": True,
     "greetings_hourly": True,

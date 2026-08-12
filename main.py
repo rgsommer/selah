@@ -1550,7 +1550,12 @@ def main():
         last_awake_assert = 0
         health_check_interval = 3600  # disk check hourly
         email_check_interval = 60  # Check email every 60 seconds
-        media_refresh_interval = 120  # Refresh file list every 2 minutes
+        # Re-scan the media library on this interval. Every scan walks all ~15k
+        # files (heavy SD I/O), and new photos already force an immediate rescan
+        # (email/QR/Drive set last_media_refresh = 0), so this periodic one only
+        # needs to catch files dropped straight onto disk — 5 min is plenty and
+        # cuts constant card thrashing (which a marginal SD card can hang on).
+        media_refresh_interval = int(config.get("media_refresh_seconds", 300) or 300)
         drive_sync_interval = config.get("drive_sync_interval", 300)
 
         media_log = _load_media_log()
