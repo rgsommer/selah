@@ -134,6 +134,7 @@ DEFAULT_CONFIG = {
     "drive_downscale_max_px": 2560,
     "drive_mirror_structure": True,
     "drive_pull_dir": "media/shared_drive",
+    "drive_timeout_seconds": 60,     # hard timeout on Drive network calls (so a stalled read can't hang the sync forever)
     "drive_pull_skip_dirs": ["display"],
     "shared_drive_granular": True,
     "feature_drive_new": True,        # freshly downloaded Drive pics are featured as new (like email/QR)

@@ -167,8 +167,19 @@ def get_drive_service(config):
             log_error(f"Failed to save token: {e}", config=config)
 
     try:
-        service = build("drive", "v3", credentials=creds)
-        return service
+        # Give every Drive HTTP call a hard socket timeout. Without it, a stalled
+        # read on a flaky network hangs the sync thread FOREVER — which also
+        # wedges is_syncing() permanently and silently stops all future syncs.
+        timeout = int(config.get("drive_timeout_seconds", 60) or 60)
+        try:
+            import httplib2
+            import google_auth_httplib2
+            authed = google_auth_httplib2.AuthorizedHttp(
+                creds, http=httplib2.Http(timeout=timeout))
+            return build("drive", "v3", http=authed)
+        except Exception as e:
+            log_error(f"Drive service (timeout http) failed, using default: {e}", config=config)
+            return build("drive", "v3", credentials=creds)
     except Exception as e:
         log_error(f"Failed to build Drive service: {e}", critical=True, config=config)
         return None
