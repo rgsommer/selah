@@ -135,7 +135,11 @@ def check_for_new_emails(config, screens):
             transient = any(t in msg for t in (
                 "name resolution", "temporary failure", "temporarily",
                 "timed out", "timeout", "connection reset", "connection refused",
-                "network is unreachable", "broken pipe", "errno -3"))
+                "network is unreachable", "broken pipe", "errno -3",
+                # a link dropping mid-conversation (flaky Wi-Fi) — not a
+                # credentials problem, so don't page the owner about it
+                "eof", "socket error", "connection aborted", "handshake",
+                "connection closed", "unexpectedly closed"))
             is_last = attempt == max_retries - 1
             error_msg = f"Email check failed (attempt {attempt + 1}/{max_retries}): {e}"
             log_error(error_msg, critical=(is_last and not transient), config=config)
