@@ -125,7 +125,7 @@ def check_for_new_emails(config, screens):
             _prune_processed(processed, max(30, lookback * 3))
             _save_processed(processed)
             mail.logout()
-            break
+            return True                      # reached the mailbox
 
         except Exception as e:
             # Transient network/DNS blips aren't real failures — don't email the
@@ -146,6 +146,7 @@ def check_for_new_emails(config, screens):
                 except Exception:
                     pass
             time.sleep(5)
+    return False                             # every attempt failed (network down)
 
 
 def _process_email(msg, config, screens):

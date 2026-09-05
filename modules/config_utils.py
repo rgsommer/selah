@@ -117,6 +117,7 @@ DEFAULT_CONFIG = {
     "calendar_display_enabled": False,
     "email_address": "",
     "email_password": "",
+    "email_check_seconds": 60,       # base email poll interval; backs off up to 16x while the network is down
     "email_lookback_days": 7,        # how far back intake scans for unhandled email
     "min_email_image_px": 500,       # skip emailed images smaller than this (signature logos/icons)
     "imap_server": "imap.gmail.com",

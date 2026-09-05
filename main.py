@@ -1281,6 +1281,29 @@ def _safe(label, fn, *args, **kwargs):
         return None
 
 
+def _poll_email(config, screens, state, current_ts):
+    """Check email when due, backing off while the network is down.
+
+    A flaky Wi-Fi link is a fact of life here, and Selah must never make it
+    worse: hammering a struggling Wi-Fi driver with reconnects every minute is
+    exactly the kind of stress that can lock the kernel. On success we poll
+    every email_check_seconds (60). After a failure we wait 2x, 4x, 8x, up to
+    16x (16 min) before trying again, then snap back to 60s the moment a check
+    succeeds. Returns True if a check actually ran this call."""
+    if current_ts < state.get("email_next", 0):
+        return False
+    base = int(config.get("email_check_seconds", 60) or 60)
+    ok = _safe("email check", check_for_new_emails, config, screens)
+    if ok is False:                                  # explicit network failure
+        state["email_backoff"] = min(state.get("email_backoff", 1) * 2, 16)
+        print(f"[Selah] Email: network down — next check in "
+              f"{base * state['email_backoff'] // 60} min")
+    else:                                            # success (or nothing to do)
+        state["email_backoff"] = 1
+    state["email_next"] = current_ts + base * state.get("email_backoff", 1)
+    return True
+
+
 def _sleep_pumping_toast(seconds, screens, config):
     """Like _responsive_sleep, but animate/erase an on-screen toast while waiting
     so it fades out and clears after its 15s instead of sitting until the next
@@ -1542,14 +1565,12 @@ def main():
 
         rotate_interval = config.get("rotate_interval", 10)
         motion_timeout = config.get("motion_timeout", 300)
-        last_email_check = 0
         last_media_refresh = 0
         last_drive_sync = 0
         last_health_check = 0
         last_mem_check = 0
         last_awake_assert = 0
         health_check_interval = 3600  # disk check hourly
-        email_check_interval = 60  # Check email every 60 seconds
         # Re-scan the media library on this interval. Every scan walks all ~15k
         # files (heavy SD I/O), and new photos already force an immediate rescan
         # (email/QR/Drive set last_media_refresh = 0), so this periodic one only
@@ -1904,12 +1925,7 @@ def main():
                     except Exception:
                         pass
                 # Keep intake alive while dark so submissions still land.
-                if current_ts - last_email_check > email_check_interval:
-                    try:
-                        _safe("email check", check_for_new_emails, config, screens)
-                    except Exception:
-                        pass
-                    last_email_check = current_ts
+                _poll_email(config, screens, state, current_ts)
                 _responsive_sleep(5)   # stays responsive to F9-again / wake keys
                 continue
             elif state.get("blackout_active") or state.get("blackout_hours", 0):
@@ -1953,9 +1969,7 @@ def main():
                     targets = _draw_night(screens, config)
                     _sweep_clocks(targets, config, 10)
                 # Still check email during night mode
-                if current_ts - last_email_check > email_check_interval:
-                    _safe("email check", check_for_new_emails, config, screens)
-                    last_email_check = current_ts
+                _poll_email(config, screens, state, current_ts)
                 # Keep pulling from Drive overnight (background; folds into the
                 # rotation when the display wakes in the morning).
                 if (config.get("cloud_backup_enabled", False)
@@ -2001,9 +2015,8 @@ def main():
                         time.sleep(5)
                         continue
 
-            # ---- EMAIL CHECK (throttled) ----
-            if current_ts - last_email_check > email_check_interval:
-                _safe("email check", check_for_new_emails, config, screens)
+            # ---- EMAIL CHECK (throttled; backs off while the network is down) ----
+            if _poll_email(config, screens, state, current_ts):
                 # Check if annual invites need to go out (first week of January)
                 try:
                     send_annual_invites(config)
@@ -2021,7 +2034,6 @@ def main():
                         send_weekly_digest(config)
                     except Exception as e:
                         log_error(f"Weekly digest check failed: {e}")
-                last_email_check = current_ts
 
             # ---- MEMORY + POWER TRACE (every 5 min; a kill/reboot leaves no
             # traceback, so sample the trend and flag undervoltage/throttling) ----
