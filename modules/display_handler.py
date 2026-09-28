@@ -254,9 +254,22 @@ def _init_dual_displays(monitors, config=None):
         total_w = max(m["x"] + m["w"] for m in monitors)
         total_h = max(m["y"] + m["h"] for m in monitors)
 
+        # Log the layout: two monitors both at +0+0 means the desktop is
+        # MIRRORING them, so the spanning window only ever covers one.
+        print("[Selah] Monitors: " + ", ".join(
+            f"{m.get('name')} {m['w']}x{m['h']}+{m['x']}+{m['y']}" for m in monitors))
+
         os.environ.setdefault("SDL_VIDEO_WINDOW_POS", "0,0")
         screen = pygame.display.set_mode((total_w, total_h), pygame.NOFRAME)
         pygame.display.set_caption("Selah Display")
+        got_w, got_h = screen.get_size()
+        print(f"[Selah] Dual-screen window: requested {total_w}x{total_h}, got {got_w}x{got_h}")
+        if (got_w, got_h) != (total_w, total_h):
+            # The display server shrank it — it is confining the window to a
+            # single output, so the second monitor can never be drawn.
+            log_error(f"Dual-screen window was resized by the display server to "
+                      f"{got_w}x{got_h} (wanted {total_w}x{total_h}) — the compositor "
+                      f"is confining it to one output")
 
         ordered = sorted(monitors, key=lambda m: (m["x"], m["y"]))
 
