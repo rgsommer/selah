@@ -197,6 +197,12 @@ def init_displays(config=None):
     try:
         pygame.init()
         pygame.mouse.set_visible(False)
+        try:
+            # Which backend SDL actually chose. The dual-screen spanning window
+            # needs 'x11' (XWayland); 'wayland' here means only one screen shows.
+            print(f"[Selah] SDL video driver: {pygame.display.get_driver()}")
+        except Exception:
+            pass
 
         monitors = _detect_monitors()
         _known_monitor_count = len(monitors)

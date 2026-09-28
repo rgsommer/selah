@@ -15,6 +15,13 @@ from random import shuffle, randrange
 # Ensure we're running from the script's directory
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+# Draw through X11 (XWayland on a Wayland desktop). Dual-screen mode is one
+# borderless window positioned at 0,0 that spans BOTH monitors — native Wayland
+# ignores window position and confines a window to a single output, so when an
+# OS update switched SDL's default backend to Wayland, only one screen showed.
+# Must be set before SDL's video subsystem initialises. An explicit env wins.
+os.environ.setdefault("SDL_VIDEODRIVER", "x11")
+
 import pygame
 
 from modules.config_utils import load_config, save_config

@@ -8,6 +8,9 @@ export DISPLAY="${DISPLAY:-:0}"
 if [ -z "$XAUTHORITY" ] && [ -f "$HOME/.Xauthority" ]; then
     export XAUTHORITY="$HOME/.Xauthority"
 fi
+# Draw through X11/XWayland: the dual-screen window spans both monitors, which
+# native Wayland does not allow (it confines a window to a single output).
+export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-x11}"
 # Stop X11 from blanking/sleeping the screens (Selah re-asserts this too).
 xset s off 2>/dev/null; xset s noblank 2>/dev/null; xset -dpms 2>/dev/null
 
